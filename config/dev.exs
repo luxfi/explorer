@@ -15,3 +15,8 @@ config :logger, :account,
   level: :debug,
   path: Path.absname("logs/dev/account.log"),
   metadata_filter: [fetcher: :account]
+
+config :logger, :indexer,
+  level: :info,
+  path: Path.absname("logs/dev/indexer.log"),
+  rotate: %{max_bytes: 52_428_800, keep: 19}
