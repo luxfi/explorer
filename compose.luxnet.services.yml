@@ -1,0 +1,158 @@
+version: '3.8'
+
+networks:
+  hanzo-network:
+    external: true
+
+services:
+  # Blockscout Backend - Explorer API
+  backend:
+    image: ghcr.io/blockscout/blockscout:${DOCKER_TAG:-latest}
+    container_name: 'luxnet-backend'
+    restart: always
+    stop_grace_period: 5m
+    command: "bin/blockscout start"
+    networks:
+      - hanzo-network
+    ports:
+      - "4000:4000"  # Fixed port for api-explore.lux.network
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    env_file:
+      - ./docker-compose/envs/common-blockscout.env
+    environment:
+      # Use host PostgreSQL with existing data
+      DATABASE_URL: postgresql://lux:lux@192.168.1.99:5432/explorer_luxnet?sslmode=disable
+      # Use host Redis
+      CACHE_REDIS_URL: redis://host.docker.internal:6379
+      CACHE_REDIS_DB: 0
+      # Chain configuration - point to host node
+      ETHEREUM_JSONRPC_HTTP_URL: http://host.docker.internal:9650/ext/bc/C/rpc
+      ETHEREUM_JSONRPC_TRACE_URL: http://host.docker.internal:9650/ext/bc/C/rpc
+      ETHEREUM_JSONRPC_WS_URL: ws://host.docker.internal:9650/ext/bc/C/ws
+      CHAIN_ID: '96369'
+      # Don't recreate tables if they exist
+      DISABLE_MIGRATE: 'false'
+      ECTO_USE_SSL: 'false'
+      MIX_ENV: 'prod'
+      # Branding
+      LOGO: '/icons/lux-logo.svg'
+      LOGO_FOOTER: '/icons/lux-logo.svg'
+      COIN: 'LUX'
+      COIN_NAME: 'LUX'
+      NETWORK: 'LUX Network'
+      SUBNETWORK: 'LUX Mainnet'
+      # Technical settings
+      ETHEREUM_JSONRPC_VARIANT: 'geth'
+      HEART_BEAT_TIMEOUT: '30'
+      BLOCK_TRANSFORMER: 'base'
+      DISABLE_REALTIME_INDEXER: 'false'
+      DISABLE_CATCHUP_INDEXER: 'false'
+      POOL_SIZE: '50'
+      POOL_SIZE_API: '10'
+      INDEXER_DISABLE_PENDING_TRANSACTIONS_FETCHER: 'true'
+      INDEXER_DISABLE_INTERNAL_TRANSACTIONS_FETCHER: 'false'
+      # CORS settings
+      API_V2_ENABLED: 'true'
+      DISABLE_CORS: 'false'
+      # Public access
+      BLOCKSCOUT_HOST: 'api-explore.lux.network'
+      BLOCKSCOUT_PROTOCOL: 'https'
+      SECRET_KEY_BASE: 'RMgI4C1HSkxsEjdhtGMfwAHfyT6CKWXOgzCboJflfSm4jeAlic52io0KkfxfTsFC'
+      CHECK_ORIGIN: 'false'
+      # Disable ads
+      DISABLE_ADS: 'true'
+      AD_PROVIDER: 'none'
+      SHOW_ADS: 'false'
+
+  # Frontend - Explorer UI
+  frontend:
+    image: ghcr.io/blockscout/frontend:${FRONTEND_TAG:-latest}
+    container_name: 'luxnet-frontend'
+    restart: always
+    networks:
+      - hanzo-network
+    ports:
+      - "3000:3000"  # Fixed port for explore.lux.network
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    env_file:
+      - ./docker-compose/envs/common-frontend.env
+    environment:
+      NEXT_PUBLIC_API_HOST: 'api-explore.lux.network'
+      NEXT_PUBLIC_API_PROTOCOL: 'https'
+      NEXT_PUBLIC_STATS_API_HOST: 'https://stats.lux.network'
+      NEXT_PUBLIC_NETWORK_NAME: 'LUX Network'
+      NEXT_PUBLIC_NETWORK_SHORT_NAME: 'LUX'
+      NEXT_PUBLIC_NETWORK_ID: '96369'
+      NEXT_PUBLIC_NETWORK_CURRENCY_NAME: 'LUX'
+      NEXT_PUBLIC_NETWORK_CURRENCY_SYMBOL: 'LUX'
+      NEXT_PUBLIC_NETWORK_CURRENCY_DECIMALS: '18'
+      NEXT_PUBLIC_NETWORK_RPC_URL: 'https://api.lux.network'
+      # Branding with LUX triangle logo
+      NEXT_PUBLIC_NETWORK_LOGO: '/images/lux-triangle.svg'
+      NEXT_PUBLIC_NETWORK_LOGO_DARK: '/images/lux-triangle.svg'
+      NEXT_PUBLIC_NETWORK_ICON: '▼'
+      # Disable ads
+      NEXT_PUBLIC_AD_PROVIDER: ''
+      NEXT_PUBLIC_AD_BANNER_PROVIDER: ''
+      NEXT_PUBLIC_AD_TEXT_PROVIDER: ''
+      NEXT_PUBLIC_IS_TESTNET: 'false'
+
+  # Stats Service
+  stats:
+    image: ghcr.io/blockscout/stats:${STATS_TAG:-latest}
+    container_name: 'luxnet-stats'
+    restart: always
+    networks:
+      - hanzo-network
+    ports:
+      - "8050:8050"  # Fixed port for stats.lux.network
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    env_file:
+      - ./docker-compose/envs/common-stats.env
+    environment:
+      # Use host PostgreSQL with existing data
+      STATS__DB_URL: postgresql://lux:lux@192.168.1.99:5432/stats_luxnet?sslmode=disable
+      STATS__BLOCKSCOUT_DB_URL: postgresql://lux:lux@192.168.1.99:5432/explorer_luxnet?sslmode=disable
+      STATS__CREATE_DATABASE: 'false'  # Don't recreate, use existing
+      STATS__RUN_MIGRATIONS: 'true'
+
+  # Visualizer Service
+  visualizer:
+    image: ghcr.io/blockscout/visualizer:${VISUALIZER_TAG:-latest}
+    container_name: 'luxnet-visualizer'
+    restart: always
+    networks:
+      - hanzo-network
+    ports:
+      - "8052:8050"  # Fixed port for viz.lux.network
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    env_file:
+      - ./docker-compose/envs/common-visualizer.env
+    environment:
+      VISUALIZER__SERVER__HTTP__ENABLED: 'true'
+      VISUALIZER__SERVER__HTTP__ADDR: '0.0.0.0:8050'
+      VISUALIZER__SERVER__GRPC__ENABLED: 'false'
+
+  # Signature Provider Service
+  sig-provider:
+    image: ghcr.io/blockscout/sig-provider:${SIG_PROVIDER_TAG:-latest}
+    container_name: 'luxnet-sig-provider'
+    restart: always
+    networks:
+      - hanzo-network
+    ports:
+      - "8051:8050"  # Fixed port for sig.lux.network
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+
+# Port Summary (All Fixed):
+# 9650 - LUX Node RPC (runs on host) -> api.lux.network, rpc.lux.network
+# 4000 - Blockscout API -> api-explore.lux.network
+# 3000 - Explorer Frontend -> explore.lux.network
+# 8050 - Stats Service -> stats.lux.network
+# 8051 - Signature Provider -> sig.lux.network
+# 8052 - Visualizer -> viz.lux.network

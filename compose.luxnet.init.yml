@@ -1,0 +1,21 @@
+version: '3.9'
+
+networks:
+  hanzo-network:
+    external: true
+
+services:
+  init-db:
+    image: ghcr.io/blockscout/blockscout:latest
+    container_name: 'luxnet-init-db'
+    command: "/bin/sh -c 'bin/blockscout eval \"Elixir.Explorer.ReleaseTasks.create_and_migrate()\"'"
+    networks:
+      - hanzo-network
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    environment:
+      DATABASE_URL: postgresql://blockscout:blockscout@lux-postgres:5432/explorer_luxnet?sslmode=disable
+      MIX_ENV: 'prod'
+      DISABLE_EXCHANGE_RATES: 'true'
+      DISABLE_KNOWN_TOKENS: 'true'
+      ECTO_USE_SSL: 'false'

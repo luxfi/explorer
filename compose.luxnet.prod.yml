@@ -1,0 +1,85 @@
+version: '3.9'
+
+networks:
+  hanzo-network:
+    external: true
+
+services:
+  backend:
+    image: ghcr.io/blockscout/blockscout:${DOCKER_TAG:-latest}
+    container_name: 'luxnet-backend'
+    restart: always
+    stop_grace_period: 5m
+    command: "bin/blockscout start"
+    networks:
+      - hanzo-network
+    ports:
+      - "4000:4000"
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    env_file:
+      - ./docker-compose/envs/common-blockscout.env
+    environment:
+      ETHEREUM_JSONRPC_HTTP_URL: http://host.docker.internal:9650/ext/bc/C/rpc
+      ETHEREUM_JSONRPC_TRACE_URL: http://host.docker.internal:9650/ext/bc/C/rpc
+      ETHEREUM_JSONRPC_WS_URL: ws://host.docker.internal:9650/ext/bc/C/ws
+      CHAIN_ID: '96369'
+      DATABASE_URL: postgresql://blockscout:blockscout@lux-postgres:5432/explorer_luxnet?sslmode=disable
+      REDIS_URL: redis://host.docker.internal:6379/0
+      DISABLE_MIGRATE: 'false'
+      ECTO_USE_SSL: 'false'
+      DISABLE_INDEXER: 'false'
+
+  frontend:
+    image: ghcr.io/blockscout/frontend:${FRONTEND_TAG:-latest}
+    container_name: 'luxnet-frontend'
+    restart: always
+    networks:
+      - hanzo-network
+    ports:
+      - "3000:3000"
+    depends_on:
+      - backend
+    env_file:
+      - ./docker-compose/envs/common-frontend.env
+    environment:
+      NEXT_PUBLIC_API_HOST: api-explore.lux.network
+      NEXT_PUBLIC_NETWORK_NAME: "LUX Network"
+      NEXT_PUBLIC_NETWORK_ID: 96369
+      NEXT_PUBLIC_NETWORK_SHORT_NAME: LUX
+      NEXT_PUBLIC_NETWORK_CURRENCY_NAME: LUX
+      NEXT_PUBLIC_NETWORK_CURRENCY_SYMBOL: LUX
+      NEXT_PUBLIC_IS_TESTNET: 'false'
+      NEXT_PUBLIC_API_BASE_PATH: /
+      NEXT_PUBLIC_STATS_API_HOST: https://stats.lux.network
+      NEXT_PUBLIC_HOMEPAGE_CHARTS: '["daily_txs"]'
+      NEXT_PUBLIC_IS_ACCOUNT_SUPPORTED: 'true'
+      NEXT_PUBLIC_NETWORK_RPC_URL: https://api.lux.network/ext/bc/C/rpc
+      NEXT_PUBLIC_HOMEPAGE_PLATE_BACKGROUND: "radial-gradient(103.03% 103.03% at 0% 0%, #FF6600 28%, #FF3300 100%)"
+      NEXT_PUBLIC_API_PROTOCOL: https
+      NEXT_PUBLIC_API_WEBSOCKET_PROTOCOL: wss
+      NEXT_PUBLIC_NETWORK_LOGO: "/static/logos/lux-logo.svg"
+      NEXT_PUBLIC_NETWORK_LOGO_DARK: "/static/logos/lux-logo-dark.svg" 
+      NEXT_PUBLIC_NETWORK_ICON: "/static/logos/lux-icon.svg"
+      NEXT_PUBLIC_NETWORK_ICON_DARK: "/static/logos/lux-icon-dark.svg"
+      NEXT_PUBLIC_HOMEPAGE_PLATE_TEXT_COLOR: "white"
+      NEXT_PUBLIC_OG_IMAGE_URL: "/static/og/lux-network.png"
+
+  stats:
+    depends_on:
+      - backend
+    image: ghcr.io/blockscout/stats:${STATS_TAG:-latest}
+    container_name: 'luxnet-stats'
+    restart: always
+    networks:
+      - hanzo-network
+    ports:
+      - "8050:8050"
+    env_file:
+      - ./docker-compose/envs/common-stats.env
+    environment:
+      STATS_DB_URL: postgresql://blockscout:blockscout@lux-postgres:5432/stats_luxnet?sslmode=disable
+      STATS_BLOCKSCOUT_DB_URL: postgresql://blockscout:blockscout@lux-postgres:5432/explorer_luxnet?sslmode=disable
+      STATS_CREATE_DATABASE: 'true'
+      STATS_RUN_MIGRATIONS: 'true'
+      STATS_SERVER_HTTP_PORT: 8050

@@ -1,0 +1,139 @@
+networks:
+  hanzo-network:
+    external: true
+
+services:
+  # LuxFi Explorer Backend
+  explorer:
+    image: ghcr.io/luxfi/explorer:${DOCKER_TAG:-latest}
+    container_name: 'luxnet-explorer'
+    restart: always
+    stop_grace_period: 5m
+    command: "bin/blockscout start"
+    networks:
+      - hanzo-network
+    ports:
+      - "4000:4000"  # Fixed port for api-explore.lux.network
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    env_file:
+      - ./docker-compose/envs/common-blockscout.env
+    environment:
+      # Use host PostgreSQL with existing data
+      DATABASE_URL: postgresql://lux:lux@host.docker.internal:5432/explorer_luxnet?sslmode=disable
+      # Use host Redis
+      CACHE_REDIS_URL: redis://host.docker.internal:6379
+      CACHE_REDIS_DB: 0
+      # Chain configuration - point to host node
+      ETHEREUM_JSONRPC_HTTP_URL: http://host.docker.internal:9650/ext/bc/C/rpc
+      ETHEREUM_JSONRPC_TRACE_URL: http://host.docker.internal:9650/ext/bc/C/rpc
+      ETHEREUM_JSONRPC_WS_URL: ws://host.docker.internal:9650/ext/bc/C/ws
+      CHAIN_ID: '96369'
+      # Don't recreate tables if they exist
+      DISABLE_MIGRATE: 'false'
+      ECTO_USE_SSL: 'false'
+      MIX_ENV: 'prod'
+      # Branding
+      LOGO: '/icons/lux-logo.svg'
+      LOGO_FOOTER: '/icons/lux-logo.svg'
+      COIN: 'LUX'
+      COIN_NAME: 'LUX'
+      NETWORK: 'LUX Network'
+      SUBNETWORK: 'LUX Mainnet'
+      # Technical settings
+      ETHEREUM_JSONRPC_VARIANT: 'geth'
+      HEART_BEAT_TIMEOUT: '30'
+      BLOCK_TRANSFORMER: 'base'
+      DISABLE_REALTIME_INDEXER: 'false'
+      DISABLE_CATCHUP_INDEXER: 'false'
+      POOL_SIZE: '100'
+      POOL_SIZE_API: '50'
+      DATABASE_POOL_SIZE: '100'
+      DATABASE_QUEUE_TARGET: '1000'
+      DATABASE_QUEUE_INTERVAL: '1000'
+      INDEXER_DISABLE_PENDING_TRANSACTIONS_FETCHER: 'true'
+      INDEXER_DISABLE_INTERNAL_TRANSACTIONS_FETCHER: 'false'
+      # CORS settings
+      API_V2_ENABLED: 'true'
+      DISABLE_CORS: 'false'
+      # Public access
+      BLOCKSCOUT_HOST: 'api-explore.lux.network'
+      BLOCKSCOUT_PROTOCOL: 'https'
+      SECRET_KEY_BASE: 'RMgI4C1HSkxsEjdhtGMfwAHfyT6CKWXOgzCboJflfSm4jeAlic52io0KkfxfTsFC'
+      CHECK_ORIGIN: 'false'
+      # Disable ads
+      DISABLE_ADS: 'true'
+      AD_PROVIDER: 'none'
+      SHOW_ADS: 'false'
+
+  # LuxFi Frontend - Explorer UI
+  frontend:
+    image: ghcr.io/luxfi/explore:${FRONTEND_TAG:-latest}
+    container_name: 'luxnet-explore'
+    restart: always
+    networks:
+      - hanzo-network
+    ports:
+      - "3000:3000"  # Fixed port for explore.lux.network
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    env_file:
+      - ./docker-compose/envs/common-frontend.env
+    environment:
+      # Only override essential variables
+      NEXT_PUBLIC_API_HOST: 'api-explore.lux.network'
+      NEXT_PUBLIC_API_PROTOCOL: 'https'
+      NEXT_PUBLIC_STATS_API_HOST: 'https://stats.lux.network'
+      NEXT_PUBLIC_NETWORK_RPC_URL: 'https://api.lux.network'
+      NEXT_PUBLIC_VISUALIZE_API_HOST: 'https://viz.lux.network'
+      # Ensure we're not setting deprecated variables
+
+  # LuxFi Stats Service
+  stats:
+    image: ghcr.io/luxfi/stats:${STATS_TAG:-latest}
+    container_name: 'luxnet-stats'
+    restart: always
+    networks:
+      - hanzo-network
+    ports:
+      - "8050:8050"  # Fixed port for stats.lux.network
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    env_file:
+      - ./docker-compose/envs/common-stats.env
+    environment:
+      # Use host PostgreSQL with existing data
+      STATS__DB_URL: postgresql://lux:lux@host.docker.internal:5432/stats_luxnet
+      STATS__BLOCKSCOUT_DB_URL: postgresql://lux:lux@host.docker.internal:5432/explorer_luxnet
+      STATS__CREATE_DATABASE: 'true'  # Create database if needed
+      STATS__RUN_MIGRATIONS: 'true'
+
+  # LuxFi Visualizer Service
+  visualizer:
+    image: ghcr.io/luxfi/visualizer:${VISUALIZER_TAG:-latest}
+    container_name: 'luxnet-visualizer'
+    restart: always
+    networks:
+      - hanzo-network
+    ports:
+      - "8052:8050"  # Fixed port for viz.lux.network
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    env_file:
+      - ./docker-compose/envs/common-visualizer.env
+    environment:
+      VISUALIZER__SERVER__HTTP__ENABLED: 'true'
+      VISUALIZER__SERVER__HTTP__ADDR: '0.0.0.0:8050'
+      VISUALIZER__SERVER__GRPC__ENABLED: 'false'
+
+  # LuxFi Signature Provider Service
+  sig-provider:
+    image: ghcr.io/luxfi/sig-provider:${SIG_PROVIDER_TAG:-latest}
+    container_name: 'luxnet-sig-provider'
+    restart: always
+    networks:
+      - hanzo-network
+    ports:
+      - "8051:8050"  # Fixed port for sig.lux.network
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
