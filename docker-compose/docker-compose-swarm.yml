@@ -1,0 +1,323 @@
+version: '3.9'
+
+# ZOO Network Explorer Services - Docker Swarm Configuration
+# Network: hanzo-network
+# Domain: explore.zoo.network
+
+x-default-opts: &default-opts
+  networks:
+    - hanzo-network
+  logging:
+    driver: "json-file"
+    options:
+      max-size: "10m"
+      max-file: "3"
+
+services:
+  # Redis Service
+  redis-db:
+    <<: *default-opts
+    extends:
+      file: ./services/redis.yml
+      service: redis-db
+    deploy:
+      replicas: 1
+      update_config:
+        parallelism: 1
+        delay: 10s
+        order: stop-first
+      restart_policy:
+        condition: on-failure
+        delay: 5s
+        max_attempts: 3
+      labels:
+        - "traefik.enable=false"
+        - "com.docker.service=explorer-zoonet-redis"
+
+  # Database Initialization
+  db-init:
+    <<: *default-opts
+    extends:
+      file: ./services/db.yml
+      service: db-init
+    deploy:
+      replicas: 1
+      restart_policy:
+        condition: on-failure
+        max_attempts: 1
+
+  # PostgreSQL Database
+  db:
+    <<: *default-opts
+    extends:
+      file: ./services/db.yml
+      service: db
+    deploy:
+      replicas: 1
+      update_config:
+        parallelism: 1
+        delay: 30s
+        order: stop-first
+      restart_policy:
+        condition: on-failure
+        delay: 5s
+        max_attempts: 3
+      labels:
+        - "traefik.enable=false"
+        - "com.docker.service=explorer-zoonet-db"
+    volumes:
+      - zoonet-explorer-db:/var/lib/postgresql/data
+
+  # Backend Service
+  backend:
+    <<: *default-opts
+    depends_on:
+      - db
+      - redis-db
+    extends:
+      file: ./services/backend.yml
+      service: backend
+    command: "bin/blockscout start"
+    extra_hosts:
+      - "k8s-host:192.168.1.99"
+      - "host-postgres:192.168.1.99"
+      - "host-redis:192.168.1.99"
+    environment:
+      ETHEREUM_JSONRPC_HTTP_URL: http://k8s-host:9650/ext/bc/bXe2MhhAnXg6WGj6G8oDk55AKT1dMMsN72S8te7JdvzfZX1zM/rpc
+      ETHEREUM_JSONRPC_TRACE_URL: http://k8s-host:9650/ext/bc/bXe2MhhAnXg6WGj6G8oDk55AKT1dMMsN72S8te7JdvzfZX1zM/rpc
+      ETHEREUM_JSONRPC_WS_URL: ws://k8s-host:9650/ext/bc/bXe2MhhAnXg6WGj6G8oDk55AKT1dMMsN72S8te7JdvzfZX1zM/ws
+      CHAIN_ID: '200200'
+      DISABLE_INDEXER: 'true'
+      DISABLE_REALTIME_INDEXER: 'true'
+      DISABLE_CATCHUP_INDEXER: 'true'
+      INDEXER_DISABLE_TOKEN_INSTANCE_FETCHER: 'true'
+      INDEXER_DISABLE_PENDING_TRANSACTIONS_FETCHER: 'true'
+      INDEXER_DISABLE_INTERNAL_TRANSACTIONS_FETCHER: 'true'
+    deploy:
+      replicas: 2
+      update_config:
+        parallelism: 1
+        delay: 30s
+        order: start-first
+      restart_policy:
+        condition: on-failure
+        delay: 5s
+        max_attempts: 3
+      labels:
+        - "traefik.enable=true"
+        - "traefik.docker.network=hanzo-network"
+        # API endpoint
+        - "traefik.http.routers.zoonet-explorer-api.rule=Host(`explore.zoo.network`) && PathPrefix(`/api`)"
+        - "traefik.http.routers.zoonet-explorer-api.entrypoints=websecure"
+        - "traefik.http.routers.zoonet-explorer-api.tls=true"
+        - "traefik.http.routers.zoonet-explorer-api.tls.certresolver=letsencrypt"
+        - "traefik.http.services.zoonet-explorer-api.loadbalancer.server.port=4000"
+        - "com.docker.service=explorer-zoonet"
+
+  # NFT Media Handler
+  nft_media_handler:
+    <<: *default-opts
+    depends_on:
+      - backend
+    extends:
+      file: ./services/nft_media_handler.yml
+      service: nft_media_handler
+    extra_hosts:
+      - "k8s-host:192.168.1.99"
+      - "host-postgres:192.168.1.99"
+      - "host-redis:192.168.1.99"
+    deploy:
+      replicas: 1
+      update_config:
+        parallelism: 1
+        delay: 10s
+        order: start-first
+      restart_policy:
+        condition: on-failure
+        delay: 5s
+        max_attempts: 3
+      labels:
+        - "traefik.enable=false"
+        - "com.docker.service=explorer-zoonet-nft-media-handler"
+
+  # Visualizer Service
+  visualizer:
+    <<: *default-opts
+    extends:
+      file: ./services/visualizer.yml
+      service: visualizer
+    deploy:
+      replicas: 1
+      update_config:
+        parallelism: 1
+        delay: 10s
+        order: start-first
+      restart_policy:
+        condition: on-failure
+        delay: 5s
+        max_attempts: 3
+      labels:
+        - "traefik.enable=false"
+        - "com.docker.service=explorer-zoonet-visualizer"
+
+  # Signature Provider
+  sig-provider:
+    <<: *default-opts
+    extends:
+      file: ./services/sig-provider.yml
+      service: sig-provider
+    deploy:
+      replicas: 1
+      update_config:
+        parallelism: 1
+        delay: 10s
+        order: start-first
+      restart_policy:
+        condition: on-failure
+        delay: 5s
+        max_attempts: 3
+      labels:
+        - "traefik.enable=false"
+        - "com.docker.service=explorer-zoonet-sig-provider"
+
+  # Frontend Service
+  frontend:
+    <<: *default-opts
+    depends_on:
+      - backend
+    extends:
+      file: ./services/frontend.yml
+      service: frontend
+    deploy:
+      replicas: 2
+      update_config:
+        parallelism: 1
+        delay: 30s
+        order: start-first
+      restart_policy:
+        condition: on-failure
+        delay: 5s
+        max_attempts: 3
+      labels:
+        - "traefik.enable=true"
+        - "traefik.docker.network=hanzo-network"
+        # Main frontend
+        - "traefik.http.routers.zoonet-explorer.rule=Host(`explore.zoo.network`)"
+        - "traefik.http.routers.zoonet-explorer.entrypoints=websecure"
+        - "traefik.http.routers.zoonet-explorer.tls=true"
+        - "traefik.http.routers.zoonet-explorer.tls.certresolver=letsencrypt"
+        - "traefik.http.services.zoonet-explorer.loadbalancer.server.port=3000"
+        # HTTP to HTTPS redirect
+        - "traefik.http.routers.zoonet-explorer-http.rule=Host(`explore.zoo.network`)"
+        - "traefik.http.routers.zoonet-explorer-http.entrypoints=web"
+        - "traefik.http.routers.zoonet-explorer-http.middlewares=redirect-to-https"
+        - "com.docker.service=explorer-zoonet"
+
+  # Stats Database Initialization
+  stats-db-init:
+    <<: *default-opts
+    extends:
+      file: ./services/stats.yml
+      service: stats-db-init
+    deploy:
+      replicas: 1
+      restart_policy:
+        condition: on-failure
+        max_attempts: 1
+
+  # Stats Database
+  stats-db:
+    <<: *default-opts
+    depends_on:
+      stats-db-init:
+        condition: service_completed_successfully
+    extends:
+      file: ./services/stats.yml
+      service: stats-db
+    deploy:
+      replicas: 1
+      update_config:
+        parallelism: 1
+        delay: 30s
+        order: stop-first
+      restart_policy:
+        condition: on-failure
+        delay: 5s
+        max_attempts: 3
+      labels:
+        - "traefik.enable=false"
+        - "com.docker.service=explorer-zoonet-stats-db"
+    volumes:
+      - zoonet-explorer-stats-db:/var/lib/postgresql/data
+
+  # Stats Service
+  stats:
+    <<: *default-opts
+    depends_on:
+      - stats-db
+      - backend
+    extends:
+      file: ./services/stats.yml
+      service: stats
+    extra_hosts:
+      - "k8s-host:192.168.1.99"
+      - "host-postgres:192.168.1.99"
+      - "host-redis:192.168.1.99"
+    deploy:
+      replicas: 1
+      update_config:
+        parallelism: 1
+        delay: 10s
+        order: start-first
+      restart_policy:
+        condition: on-failure
+        delay: 5s
+        max_attempts: 3
+      labels:
+        - "traefik.enable=true"
+        - "traefik.docker.network=hanzo-network"
+        # Stats API
+        - "traefik.http.routers.zoonet-stats.rule=Host(`explore.zoo.network`) && PathPrefix(`/stats`)"
+        - "traefik.http.routers.zoonet-stats.entrypoints=websecure"
+        - "traefik.http.routers.zoonet-stats.tls=true"
+        - "traefik.http.routers.zoonet-stats.tls.certresolver=letsencrypt"
+        - "traefik.http.services.zoonet-stats.loadbalancer.server.port=8050"
+        - "com.docker.service=explorer-zoonet-stats"
+
+  # User Operations Indexer
+  user-ops-indexer:
+    <<: *default-opts
+    depends_on:
+      - db
+      - backend
+    extends:
+      file: ./services/user-ops-indexer.yml
+      service: user-ops-indexer
+    extra_hosts:
+      - "k8s-host:192.168.1.99"
+      - "host-postgres:192.168.1.99"
+      - "host-redis:192.168.1.99"
+    deploy:
+      replicas: 1
+      update_config:
+        parallelism: 1
+        delay: 10s
+        order: start-first
+      restart_policy:
+        condition: on-failure
+        delay: 5s
+        max_attempts: 3
+      labels:
+        - "traefik.enable=false"
+        - "com.docker.service=explorer-zoonet-user-ops-indexer"
+
+networks:
+  hanzo-network:
+    external: true
+    attachable: true
+
+volumes:
+  zoonet-explorer-db:
+    driver: local
+  zoonet-explorer-stats-db:
+    driver: local

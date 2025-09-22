@@ -1,0 +1,30 @@
+version: '3.8'
+
+services:
+  backend:
+    image: blockscout/blockscout:latest
+    environment:
+      DATABASE_URL: postgresql://blockscout:blockscout@postgres:5432/blockscout_zoo_testnet
+      ETHEREUM_JSONRPC_VARIANT: geth
+      ETHEREUM_JSONRPC_HTTP_URL: http://host.docker.internal:9650/ext/bc/2usKC5aApgWQWwanB4LL6QPoqxR1bWWjPCtemBYbZvxkNfcnbj/rpc
+      ETHEREUM_JSONRPC_WS_URL: ws://host.docker.internal:9650/ext/bc/2usKC5aApgWQWwanB4LL6QPoqxR1bWWjPCtemBYbZvxkNfcnbj/rpc/ws
+      NETWORK: ZOO Testnet
+      SUBNETWORK: Testnet
+      COIN: ZOO
+      PORT: 4104
+    ports:
+      - "4104:4000"
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+
+  postgres:
+    image: postgres:13
+    environment:
+      POSTGRES_DB: blockscout_zoo_testnet
+      POSTGRES_USER: blockscout
+      POSTGRES_PASSWORD: blockscout
+    volumes:
+      - postgres_zoo_testnet:/var/lib/postgresql/data
+
+volumes:
+  postgres_zoo_testnet:
