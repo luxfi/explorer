@@ -5,15 +5,14 @@ defmodule BlockScoutWeb.API.V2.CeloController do
 
   import BlockScoutWeb.Chain,
     only: [
-      next_page_params: 4,
+      next_page_params: 5,
       split_list_by_page: 1
     ]
 
   import Explorer.PagingOptions, only: [default_paging_options: 0]
-  import BlockScoutWeb.PagingHelper, only: [delete_parameters_from_next_page_params: 1]
 
+  alias Explorer.Chain.Celo.{AggregatedElectionReward, ElectionReward, Epoch}
   alias Explorer.Chain.Hash
-  alias Explorer.Chain.Celo.{ElectionReward, Epoch}
   alias Explorer.PagingOptions
 
   action_fallback(BlockScoutWeb.API.V2.FallbackController)
@@ -42,12 +41,11 @@ defmodule BlockScoutWeb.API.V2.CeloController do
 
     {epochs, next_page} =
       options
-      |> Epoch.fetched_epochs()
+      |> Epoch.all()
       |> split_list_by_page()
 
     filtered_params =
       params
-      |> delete_parameters_from_next_page_params()
       |> Map.drop(["number"])
 
     next_page_params =
@@ -55,6 +53,7 @@ defmodule BlockScoutWeb.API.V2.CeloController do
         next_page,
         epochs,
         filtered_params,
+        false,
         &%{number: &1.number}
       )
 
@@ -81,7 +80,7 @@ defmodule BlockScoutWeb.API.V2.CeloController do
 
     with {:ok, number} <- parse_epoch_number(number_string),
          {:ok, epoch} <- Epoch.from_number(number, options) do
-      aggregated_rewards = ElectionReward.epoch_number_to_rewards_aggregated_by_type(epoch.number, options)
+      aggregated_rewards = AggregatedElectionReward.epoch_number_to_rewards_aggregated_by_type(epoch.number, api?: true)
 
       conn
       |> render(:celo_epoch, %{
@@ -134,6 +133,7 @@ defmodule BlockScoutWeb.API.V2.CeloController do
           next_page,
           rewards,
           filtered_params,
+          false,
           &%{
             amount: &1.amount,
             account_address_hash: &1.account_address_hash,
@@ -181,7 +181,7 @@ defmodule BlockScoutWeb.API.V2.CeloController do
           {:ok, non_neg_integer()} | {:error, {:invalid, :number}}
   defp parse_epoch_number(number) do
     case safe_parse_non_negative_integer(number) do
-      {:ok, epoch_number} -> {:ok, epoch_number}
+      {:ok, epoch_number} when epoch_number < 32_768 -> {:ok, epoch_number}
       _ -> {:error, {:invalid, :number}}
     end
   end

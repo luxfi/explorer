@@ -5,7 +5,9 @@ defmodule Explorer.Chain.Transaction.Schema do
     Changes in the schema should be reflected in the bulk import module:
     - Explorer.Chain.Import.Runner.Transactions
   """
-  use Utils.CompileTimeEnvHelper, chain_type: [:explorer, :chain_type]
+  use Utils.CompileTimeEnvHelper,
+    chain_type: [:explorer, :chain_type],
+    chain_identity: [:explorer, :chain_identity]
 
   alias Explorer.Chain
 
@@ -49,6 +51,9 @@ defmodule Explorer.Chain.Transaction.Schema do
                               field(:l1_gas_used, :decimal)
                               field(:l1_transaction_origin, Hash.Full)
                               field(:l1_block_number, :integer)
+                              field(:operator_fee_scalar, :decimal)
+                              field(:operator_fee_constant, :decimal)
+                              field(:da_footprint_gas_scalar, :decimal)
                             end,
                             2
                           )
@@ -136,28 +141,6 @@ defmodule Explorer.Chain.Transaction.Schema do
                             2
                           )
 
-                        :celo ->
-                          elem(
-                            quote do
-                              field(:gateway_fee, Wei)
-
-                              belongs_to(:gas_fee_recipient, Address,
-                                foreign_key: :gas_fee_recipient_address_hash,
-                                references: :hash,
-                                type: Hash.Address
-                              )
-
-                              belongs_to(:gas_token_contract_address, Address,
-                                foreign_key: :gas_token_contract_address_hash,
-                                references: :hash,
-                                type: Hash.Address
-                              )
-
-                              has_one(:gas_token, through: [:gas_token_contract_address, :token])
-                            end,
-                            2
-                          )
-
                         :arbitrum ->
                           elem(
                             quote do
@@ -196,9 +179,48 @@ defmodule Explorer.Chain.Transaction.Schema do
                             2
                           )
 
+                        :zilliqa ->
+                          alias Explorer.Chain.Zilliqa.Zrc2.TokenTransfer, as: Zrc2TokenTransfer
+
+                          quote do
+                            [
+                              has_many(:zilliqa_zrc2_token_transfers, Zrc2TokenTransfer,
+                                foreign_key: :transaction_hash,
+                                references: :hash
+                              )
+                            ]
+                          end
+
                         _ ->
                           []
                       end)
+
+  @chain_identity_fields (case @chain_identity do
+                            {:optimism, :celo} ->
+                              elem(
+                                quote do
+                                  field(:gateway_fee, Wei)
+
+                                  belongs_to(:gas_fee_recipient, Address,
+                                    foreign_key: :gas_fee_recipient_address_hash,
+                                    references: :hash,
+                                    type: Hash.Address
+                                  )
+
+                                  belongs_to(:gas_token_contract_address, Address,
+                                    foreign_key: :gas_token_contract_address_hash,
+                                    references: :hash,
+                                    type: Hash.Address
+                                  )
+
+                                  has_one(:gas_token, through: [:gas_token_contract_address, :token])
+                                end,
+                                2
+                              )
+
+                            _ ->
+                              []
+                          end)
 
   defmacro generate do
     quote do
@@ -290,6 +312,7 @@ defmodule Explorer.Chain.Transaction.Schema do
         has_one(:pending_operation, PendingTransactionOperation, foreign_key: :transaction_hash, references: :hash)
 
         unquote_splicing(@chain_type_fields)
+        unquote_splicing(@chain_identity_fields)
       end
     end
   end
@@ -302,7 +325,11 @@ defmodule Explorer.Chain.Transaction do
 
   use Utils.CompileTimeEnvHelper,
     chain_type: [:explorer, :chain_type],
+    chain_identity: [:explorer, :chain_identity],
     decode_not_a_contract_calls: [:explorer, :decode_not_a_contract_calls]
+
+  use Utils.RuntimeEnvHelper,
+    op_jovian_timestamp: [:indexer, [Indexer.Fetcher.Optimism.EIP1559ConfigUpdate, :jovian_timestamp_l2]]
 
   require Logger
   require Explorer.Chain.Transaction.Schema
@@ -320,6 +347,7 @@ defmodule Explorer.Chain.Transaction do
     Data,
     DenormalizationHelper,
     Hash,
+    MethodIdentifier,
     SmartContract.Proxy,
     TokenTransfer,
     Transaction,
@@ -329,8 +357,6 @@ defmodule Explorer.Chain.Transaction do
   alias Explorer.Chain.Block.Reader.General, as: BlockReaderGeneral
 
   alias Explorer.Chain.SmartContract.Proxy.Models.Implementation
-
-  alias Explorer.Helper, as: ExplorerHelper
 
   alias Explorer.SmartContract.SigProviderInterface
 
@@ -342,7 +368,7 @@ defmodule Explorer.Chain.Transaction do
 
   @chain_type_optional_attrs (case @chain_type do
                                 :optimism ->
-                                  ~w(l1_fee l1_fee_scalar l1_gas_price l1_gas_used l1_transaction_origin l1_block_number)a
+                                  ~w(l1_fee l1_fee_scalar l1_gas_price l1_gas_used l1_transaction_origin l1_block_number operator_fee_scalar operator_fee_constant da_footprint_gas_scalar)a
 
                                 :scroll ->
                                   ~w(l1_fee queue_index)a
@@ -353,12 +379,17 @@ defmodule Explorer.Chain.Transaction do
                                 :arbitrum ->
                                   ~w(gas_used_for_l1)a
 
-                                :celo ->
-                                  ~w(gateway_fee gas_fee_recipient_address_hash gas_token_contract_address_hash)a
-
                                 _ ->
                                   ~w()a
                               end)
+
+  @chain_identity_optional_attrs (case @chain_identity do
+                                    {:optimism, :celo} ->
+                                      ~w(gateway_fee gas_fee_recipient_address_hash gas_token_contract_address_hash)a
+
+                                    _ ->
+                                      ~w()a
+                                  end)
 
   @required_attrs ~w(from_address_hash gas hash input nonce value)a
 
@@ -523,6 +554,9 @@ defmodule Explorer.Chain.Transaction do
    * `wrapped_r` - R field of the signature from the `wrapped` field (used by Suave)
    * `wrapped_s` - S field of the signature from the `wrapped` field (used by Suave)
    * `wrapped_hash` - hash from the `wrapped` field (used by Suave)
+   * `operator_fee_scalar` - operatorFeeScalar is a uint32 scalar set by a chain operator (used by some OP chains)
+   * `operator_fee_constant` - operatorFeeConstant is a uint64 constant set by a chain operator (used by some OP chains)
+   * `da_footprint_gas_scalar` - daFootprintGasScalar is a uint16 scalar used to calculate daFootprint introduced in Jovian OP upgrade
   """
   Explorer.Chain.Transaction.Schema.generate()
 
@@ -679,7 +713,8 @@ defmodule Explorer.Chain.Transaction do
     attrs_to_cast =
       @required_attrs ++
         @optional_attrs ++
-        @chain_type_optional_attrs
+        @chain_type_optional_attrs ++
+        @chain_identity_optional_attrs
 
     transaction
     |> cast(attrs, attrs_to_cast)
@@ -809,6 +844,14 @@ defmodule Explorer.Chain.Transaction do
   def decoded_input_data(%NotLoaded{}, _, _, _, _),
     do: {:error, :not_loaded}
 
+  if @chain_identity == {:optimism, :celo} do
+    # Celo's Epoch logs does not have an associated transaction and linked to
+    # the block instead, so we discard these token transfers for transaction
+    # decoding
+    def decoded_input_data(nil, _, _, _, _),
+      do: {:error, :celo_epoch_log}
+  end
+
   # skip decoding if input is empty
   def decoded_input_data(
         %__MODULE__{input: %{bytes: bytes}},
@@ -895,6 +938,7 @@ defmodule Explorer.Chain.Transaction do
         methods_map,
         _smart_contract_full_abi_map
       ) do
+    {:ok, method_id} = MethodIdentifier.cast(method_id)
     methods = check_methods_cache(method_id, methods_map, options)
 
     candidates =
@@ -966,6 +1010,15 @@ defmodule Explorer.Chain.Transaction do
         output
     end
   end
+
+  def decoded_input_data(
+        %__MODULE__{to_address: %{metadata: _, ens_domain_name: _}},
+        _,
+        _,
+        _,
+        _
+      ),
+      do: {:error, :no_to_address}
 
   defp decode_function_call_via_sig_provider_wrapper(input, hash, skip_sig_provider?) do
     case decode_function_call_via_sig_provider(input, hash, skip_sig_provider?) do
@@ -1040,7 +1093,8 @@ defmodule Explorer.Chain.Transaction do
           parse_method_name(decoded_func)
 
         {:error, :contract_not_verified, []} ->
-          ExplorerHelper.add_0x_prefix(method_id)
+          {:ok, method_id} = MethodIdentifier.cast(method_id)
+          to_string(method_id)
 
         _ ->
           "Transfer"
@@ -1409,6 +1463,39 @@ defmodule Explorer.Chain.Transaction do
       order_by: [desc: :block_number],
       limit: 1
     )
+  end
+
+  @doc """
+  Streams a batch of transactions without OP operator fee for which the fee needs to be defined.
+
+  This function selects specific fields from the transaction records and applies a reducer function to each entry in the stream, accumulating the result.
+
+  ## Parameters
+  - `initial`: The initial accumulator value.
+  - `reducer`: A function that takes an entry and the current accumulator, returning the updated accumulator.
+  - `start_timestamp`: A timestamp starting from which the transactions should be scanned.
+
+  ## Returns
+  - `{:ok, accumulator}`: A tuple containing `:ok` and the final accumulator after processing the stream.
+  """
+  @spec stream_transactions_without_operator_fee(
+          initial :: accumulator,
+          reducer :: (entry :: Hash.t(), accumulator -> accumulator),
+          start_timestamp :: non_neg_integer()
+        ) :: {:ok, accumulator}
+        when accumulator: term()
+  def stream_transactions_without_operator_fee(initial, reducer, start_timestamp) when is_function(reducer, 2) do
+    limit = Application.get_env(:indexer, Indexer.Fetcher.Optimism.OperatorFee)[:init_limit]
+    start_datetime = DateTime.from_unix!(start_timestamp)
+
+    __MODULE__
+    |> select([t], t.hash)
+    |> where(
+      [t],
+      t.block_timestamp >= ^start_datetime and t.block_consensus == true and is_nil(t.operator_fee_constant)
+    )
+    |> limit(^limit)
+    |> Repo.stream_reduce(initial, reducer)
   end
 
   @doc """
@@ -1919,19 +2006,19 @@ defmodule Explorer.Chain.Transaction do
   Returns next page params based on the provided transaction.
   """
   @spec address_transactions_next_page_params(Explorer.Chain.Transaction.t()) :: %{
-          required(String.t()) => Decimal.t() | Wei.t() | non_neg_integer | DateTime.t() | Hash.t()
+          required(atom()) => Decimal.t() | Wei.t() | non_neg_integer | DateTime.t() | Hash.t()
         }
   def address_transactions_next_page_params(
         %__MODULE__{block_number: block_number, index: index, inserted_at: inserted_at, hash: hash, value: value} =
           transaction
       ) do
     %{
-      "fee" => transaction |> fee(:wei) |> elem(1),
-      "value" => value,
-      "block_number" => block_number,
-      "index" => index,
-      "inserted_at" => inserted_at,
-      "hash" => hash
+      fee: transaction |> fee(:wei) |> elem(1),
+      value: value,
+      block_number: block_number,
+      index: index,
+      inserted_at: inserted_at,
+      hash: hash
     }
   end
 
@@ -1964,11 +2051,11 @@ defmodule Explorer.Chain.Transaction do
       {:actual, Decimal.new(4)}
 
   """
-  @spec fee(Transaction.t(), :ether | :gwei | :wei) :: {:maximum, Decimal.t()} | {:actual, Decimal.t() | nil}
+  @spec fee(Transaction.t(), :ether | :gwei | :wei) :: {:maximum, Decimal.t() | nil} | {:actual, Decimal.t() | nil}
   def fee(%Transaction{gas: _gas, gas_price: nil, gas_used: nil}, _unit), do: {:maximum, nil}
 
-  def fee(%Transaction{gas: gas, gas_price: gas_price, gas_used: nil} = transaction, unit) do
-    {:maximum, fee_calc(transaction, gas_price, gas, unit)}
+  def fee(%Transaction{gas: gas, gas_price: _gas_price, gas_used: nil} = transaction, unit) do
+    {:maximum, fee_calc(transaction, gas, unit)}
   end
 
   if @chain_type == :optimism do
@@ -1982,22 +2069,86 @@ defmodule Explorer.Chain.Transaction do
     end
   end
 
-  def fee(%Transaction{gas_price: gas_price, gas_used: gas_used} = transaction, unit) do
-    {:actual, fee_calc(transaction, gas_price, gas_used, unit)}
+  def fee(%Transaction{gas_price: _gas_price, gas_used: gas_used} = transaction, unit) do
+    {:actual, fee_calc(transaction, gas_used, unit)}
   end
 
-  defp fee_calc(transaction, gas_price, gas_used, unit) do
+  # Internal function calculating a total fee of the transaction as follows:
+  #   total_fee = l2_fee + l1_fee + operator_fee
+  # The `operator_fee` is only calculated for OP chains (for others it's zero) starting from the Isthmus upgrade.
+  #
+  # ## Parameters
+  # - `transaction`: The transaction entity.
+  # - `gas_used`: The amount of gas used in the transaction. Equals to gas limit for pending transactions.
+  # - `unit`: Which unit the result should be presented in. One of [:ether, :gwei, :wei].
+  #
+  # ## Returns
+  # - The calculated total fee.
+  @spec fee_calc(Transaction.t(), Decimal.t(), :ether | :gwei | :wei) :: Decimal.t()
+  defp fee_calc(transaction, gas_used, unit) do
     l1_fee =
       case Map.get(transaction, :l1_fee) do
         nil -> Wei.from(Decimal.new(0), :wei)
         value -> value
       end
 
-    gas_price
+    {:ok, operator_fee} =
+      transaction
+      |> operator_fee()
+      |> Wei.cast()
+
+    transaction.gas_price
     |> l2_fee_calc(gas_used, unit)
     |> Wei.from(unit)
     |> Wei.sum(l1_fee)
+    |> Wei.sum(operator_fee)
     |> Wei.to(unit)
+  end
+
+  @doc """
+    The operator fee is calculated for OP chains starting from the Isthmus upgrade
+    as described in https://specs.optimism.io/protocol/isthmus/exec-engine.html#operator-fee
+    The formula changed in Jovian upgrade as follows:
+    https://specs.optimism.io/protocol/jovian/exec-engine.html#fee-formula-update
+
+    If the `operatorFeeScalar` or `operatorFeeConstant` is `nil`, it's treated as zero.
+
+    ## Parameters
+    - `transaction`: The transaction entity.
+
+    ## Returns
+    - The calculated operator fee for the given transaction.
+  """
+  @spec operator_fee(Transaction.t()) :: Decimal.t()
+  def operator_fee(
+        %Transaction{
+          gas: gas,
+          gas_used: gas_used
+        } = transaction
+      ) do
+    gas_used = gas_used || gas
+    operator_fee_scalar = Map.get(transaction, :operator_fee_scalar) || Decimal.new(0)
+    operator_fee_constant = Map.get(transaction, :operator_fee_constant) || Decimal.new(0)
+
+    jovian_timestamp = op_jovian_timestamp()
+
+    block_timestamp =
+      Map.get(transaction, :block_timestamp) || (jovian_timestamp && DateTime.from_unix!(jovian_timestamp)) ||
+        DateTime.from_unix!(0)
+
+    if DateTime.to_unix(block_timestamp) >= jovian_timestamp do
+      # use the formula for Jovian
+      gas_used
+      |> Decimal.mult(operator_fee_scalar)
+      |> Decimal.mult(100)
+      |> Decimal.add(operator_fee_constant)
+    else
+      # use the formula for Isthmus
+      gas_used
+      |> Decimal.mult(operator_fee_scalar)
+      |> Decimal.div_int(1_000_000)
+      |> Decimal.add(operator_fee_constant)
+    end
   end
 
   @doc """
@@ -2116,8 +2267,12 @@ defmodule Explorer.Chain.Transaction do
     empty_methods_map =
       transactions
       |> Enum.flat_map(fn
-        %{input: %{bytes: <<method_id::binary-size(4), _::binary>>}} -> [method_id]
-        _ -> []
+        %{input: %{bytes: <<method_id::binary-size(4), _::binary>>}} ->
+          {:ok, method_id} = MethodIdentifier.cast(method_id)
+          [method_id]
+
+        _ ->
+          []
       end)
       |> Enum.into(%{}, &{&1, []})
 
@@ -2144,17 +2299,35 @@ defmodule Explorer.Chain.Transaction do
 
     # decode remaining transaction using methods map
     decoded_transactions
-    |> Enum.map(fn
-      {nil, transaction} ->
-        transaction
-        |> Map.put(:to_address, %NotLoaded{})
-        |> decoded_input_data(skip_sig_provider?, opts, methods_map, smart_contract_full_abi_map)
-        |> format_decoded_input()
-
-      {decoded, _} ->
-        decoded
-    end)
+    |> Enum.map(
+      &decode_remaining_transaction(
+        &1,
+        skip_sig_provider?,
+        opts,
+        methods_map,
+        smart_contract_full_abi_map
+      )
+    )
   end
+
+  if @chain_identity == {:optimism, :celo} do
+    defp decode_remaining_transaction({nil, nil}, _, _, _, _), do: nil
+  end
+
+  defp decode_remaining_transaction(
+         {nil, transaction},
+         skip_sig_provider?,
+         opts,
+         methods_map,
+         smart_contract_full_abi_map
+       ) do
+    transaction
+    |> Map.put(:to_address, %NotLoaded{})
+    |> decoded_input_data(skip_sig_provider?, opts, methods_map, smart_contract_full_abi_map)
+    |> format_decoded_input()
+  end
+
+  defp decode_remaining_transaction({decoded, _}, _, _, _, _), do: decoded
 
   defp combine_smart_contract_full_abi_map(transactions) do
     # parse unique address hashes of smart-contracts from to_address and created_contract_address properties of the transactions list
@@ -2225,7 +2398,8 @@ defmodule Explorer.Chain.Transaction do
         skip_sc_check?
       ) do
     if skip_sc_check? || Address.smart_contract?(to_address) do
-      ExplorerHelper.add_0x_prefix(method_id)
+      {:ok, method_id} = MethodIdentifier.cast(method_id)
+      method_id |> to_string()
     else
       nil
     end
@@ -2234,4 +2408,15 @@ defmodule Explorer.Chain.Transaction do
   def method_name(_, _, _) do
     nil
   end
+
+  @doc """
+    Return method id used in transaction
+  """
+  def method_id(%__MODULE__{
+        created_contract_address_hash: nil,
+        input: %{bytes: <<method_id::binary-size(4), _::binary>>}
+      }),
+      do: "0x" <> Base.encode16(method_id, case: :lower)
+
+  def method_id(_transaction), do: "0x"
 end

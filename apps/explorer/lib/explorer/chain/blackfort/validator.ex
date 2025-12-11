@@ -5,9 +5,9 @@ defmodule Explorer.Chain.Blackfort.Validator do
 
   use Explorer.Schema
 
+  alias Explorer.{Chain, Helper, HttpClient, Repo, SortingHelper}
   alias Explorer.Chain.{Address, Import}
   alias Explorer.Chain.Hash.Address, as: HashAddress
-  alias Explorer.{Chain, Helper, Repo, SortingHelper}
 
   require Logger
 
@@ -148,8 +148,7 @@ defmodule Explorer.Chain.Blackfort.Validator do
     url = validator_url()
 
     with {:url, true} <- {:url, Helper.valid_url?(url)},
-         {:ok, %HTTPoison.Response{status_code: 200, body: body}} <-
-           HTTPoison.get(validator_url(), [], follow_redirect: true) do
+         {:ok, %{status_code: 200, body: body}} <- HttpClient.get(validator_url(), [], follow_redirect: true) do
       body |> Jason.decode() |> parse_validators_info()
     else
       {:url, false} ->
