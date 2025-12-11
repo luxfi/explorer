@@ -1,0 +1,103 @@
+# ZOO Network Mainnet Explorer
+# Chain ID: 200200
+# Frontend: explore.zoo.network -> localhost:3001
+# Backend API: api-explore.zoo.network -> localhost:4002
+# Note: Uses shared visualizer and sig-provider from lux-mainnet
+
+services:
+  backend:
+    image: ghcr.io/blockscout/blockscout:${DOCKER_TAG:-latest}
+    pull_policy: always
+    restart: always
+    stop_grace_period: 5m
+    container_name: 'zoo-mainnet-backend'
+    command: sh -c "bin/blockscout eval 'Explorer.ReleaseTasks.create_and_migrate()' && bin/blockscout start"
+    ports:
+      - "4002:4000"
+    networks:
+      - hanzo-network
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    env_file:
+      - ./envs/common-blockscout.env
+    environment:
+      ETHEREUM_JSONRPC_HTTP_URL: http://host.docker.internal:9630/ext/bc/bXe2MhhAnXg6WGj6G8oDk55AKT1dMMsN72S8te7JdvzfZX1zM/rpc
+      ETHEREUM_JSONRPC_TRACE_URL: http://host.docker.internal:9630/ext/bc/bXe2MhhAnXg6WGj6G8oDk55AKT1dMMsN72S8te7JdvzfZX1zM/rpc
+      ETHEREUM_JSONRPC_WS_URL: ws://host.docker.internal:9630/ext/bc/bXe2MhhAnXg6WGj6G8oDk55AKT1dMMsN72S8te7JdvzfZX1zM/ws
+      CHAIN_ID: '200200'
+      DATABASE_URL: postgresql://blockscout:blockscout@lux-postgres:5432/explorer_zoonet?sslmode=disable
+      DISABLE_MIGRATE: 'false'
+      DISABLE_INDEXER: 'false'
+      DISABLE_REALTIME_INDEXER: 'false'
+      DISABLE_CATCHUP_INDEXER: 'false'
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:4000/api/v2/stats"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 60s
+
+  frontend:
+    image: ghcr.io/blockscout/frontend:${FRONTEND_TAG:-latest}
+    pull_policy: always
+    restart: always
+    container_name: 'zoo-mainnet-frontend'
+    depends_on:
+      - backend
+    ports:
+      - "3001:3000"
+    networks:
+      - hanzo-network
+    env_file:
+      - ./envs/common-frontend.env
+    environment:
+      NEXT_PUBLIC_API_HOST: api-explore.zoo.network
+      NEXT_PUBLIC_API_PROTOCOL: https
+      NEXT_PUBLIC_APP_HOST: explore.zoo.network
+      NEXT_PUBLIC_APP_PROTOCOL: https
+      NEXT_PUBLIC_NETWORK_NAME: "ZOO Network"
+      NEXT_PUBLIC_NETWORK_SHORT_NAME: ZOO
+      NEXT_PUBLIC_NETWORK_ID: 200200
+      NEXT_PUBLIC_NETWORK_CURRENCY_NAME: ZOO
+      NEXT_PUBLIC_NETWORK_CURRENCY_SYMBOL: ZOO
+      NEXT_PUBLIC_NETWORK_CURRENCY_DECIMALS: 18
+      NEXT_PUBLIC_IS_TESTNET: 'false'
+      NEXT_PUBLIC_NETWORK_LOGO: https://explore.zoo.network/images/zoo_logo.svg
+      NEXT_PUBLIC_NETWORK_LOGO_DARK: https://explore.zoo.network/images/zoo_logo.svg
+      NEXT_PUBLIC_NETWORK_ICON: https://explore.zoo.network/images/zoo_logo.svg
+      NEXT_PUBLIC_HOMEPAGE_CHARTS: '["daily_txs"]'
+      NEXT_PUBLIC_VISUALIZE_API_HOST: https://viz.lux.network
+      NEXT_PUBLIC_STATS_API_HOST: https://stats.zoo.network
+      NEXT_PUBLIC_API_WEBSOCKET_PROTOCOL: wss
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:3000"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 30s
+
+  stats:
+    image: ghcr.io/blockscout/stats:${STATS_VERSION:-latest}
+    pull_policy: always
+    restart: always
+    container_name: 'zoo-mainnet-stats'
+    depends_on:
+      - backend
+    networks:
+      - hanzo-network
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    env_file:
+      - ./envs/common-stats.env
+    environment:
+      STATS__DB_URL: postgresql://blockscout:blockscout@lux-postgres:5432/stats_zoonet
+      STATS__BLOCKSCOUT_DB_URL: postgresql://blockscout:blockscout@lux-postgres:5432/explorer_zoonet
+      STATS__BLOCKSCOUT_API_URL: http://zoo-mainnet-backend:4000
+      STATS__CREATE_DATABASE: 'true'
+      STATS__RUN_MIGRATIONS: 'true'
+    ports:
+      - "8252:8050"
+
+networks:
+  hanzo-network:
+    external: true

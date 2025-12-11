@@ -1,0 +1,103 @@
+# LUX Network Testnet Explorer
+# Chain ID: 96368
+# Frontend: explore-test.lux.network -> localhost:3010
+# Backend API: api-explore-test.lux.network -> localhost:4010
+# Note: Uses shared visualizer and sig-provider from lux-mainnet
+
+services:
+  backend:
+    image: ghcr.io/blockscout/blockscout:${DOCKER_TAG:-latest}
+    pull_policy: always
+    restart: always
+    stop_grace_period: 5m
+    container_name: 'lux-testnet-backend'
+    command: sh -c "bin/blockscout eval 'Explorer.ReleaseTasks.create_and_migrate()' && bin/blockscout start"
+    ports:
+      - "4010:4000"
+    networks:
+      - hanzo-network
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    env_file:
+      - ./envs/common-blockscout.env
+    environment:
+      ETHEREUM_JSONRPC_HTTP_URL: http://host.docker.internal:9630/ext/bc/2sdADEgBC3NjLM4inKc1hY1PQpCT3JVyGVJxdmcq6sqrDndjFG/rpc
+      ETHEREUM_JSONRPC_TRACE_URL: http://host.docker.internal:9630/ext/bc/2sdADEgBC3NjLM4inKc1hY1PQpCT3JVyGVJxdmcq6sqrDndjFG/rpc
+      ETHEREUM_JSONRPC_WS_URL: ws://host.docker.internal:9630/ext/bc/2sdADEgBC3NjLM4inKc1hY1PQpCT3JVyGVJxdmcq6sqrDndjFG/ws
+      CHAIN_ID: '96368'
+      DATABASE_URL: postgresql://blockscout:blockscout@lux-postgres:5432/explorer_luxtest?sslmode=disable
+      DISABLE_MIGRATE: 'false'
+      DISABLE_INDEXER: 'false'
+      DISABLE_REALTIME_INDEXER: 'false'
+      DISABLE_CATCHUP_INDEXER: 'false'
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:4000/api/v2/stats"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 60s
+
+  frontend:
+    image: ghcr.io/blockscout/frontend:${FRONTEND_TAG:-latest}
+    pull_policy: always
+    restart: always
+    container_name: 'lux-testnet-frontend'
+    depends_on:
+      - backend
+    ports:
+      - "3010:3000"
+    networks:
+      - hanzo-network
+    env_file:
+      - ./envs/common-frontend.env
+    environment:
+      NEXT_PUBLIC_API_HOST: api-explore-test.lux.network
+      NEXT_PUBLIC_API_PROTOCOL: https
+      NEXT_PUBLIC_APP_HOST: explore-test.lux.network
+      NEXT_PUBLIC_APP_PROTOCOL: https
+      NEXT_PUBLIC_NETWORK_NAME: "LUX Testnet"
+      NEXT_PUBLIC_NETWORK_SHORT_NAME: LUX
+      NEXT_PUBLIC_NETWORK_ID: 96368
+      NEXT_PUBLIC_NETWORK_CURRENCY_NAME: LUX
+      NEXT_PUBLIC_NETWORK_CURRENCY_SYMBOL: LUX
+      NEXT_PUBLIC_NETWORK_CURRENCY_DECIMALS: 18
+      NEXT_PUBLIC_IS_TESTNET: 'true'
+      NEXT_PUBLIC_NETWORK_LOGO: https://explore.lux.network/images/lux_logo.svg
+      NEXT_PUBLIC_NETWORK_LOGO_DARK: https://explore.lux.network/images/lux_logo.svg
+      NEXT_PUBLIC_NETWORK_ICON: https://explore.lux.network/images/lux_logo.svg
+      NEXT_PUBLIC_HOMEPAGE_CHARTS: '["daily_txs"]'
+      NEXT_PUBLIC_VISUALIZE_API_HOST: https://viz.lux.network
+      NEXT_PUBLIC_STATS_API_HOST: https://stats-test.lux.network
+      NEXT_PUBLIC_API_WEBSOCKET_PROTOCOL: wss
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:3000"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 30s
+
+  stats:
+    image: ghcr.io/blockscout/stats:${STATS_VERSION:-latest}
+    pull_policy: always
+    restart: always
+    container_name: 'lux-testnet-stats'
+    depends_on:
+      - backend
+    networks:
+      - hanzo-network
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    env_file:
+      - ./envs/common-stats.env
+    environment:
+      STATS__DB_URL: postgresql://blockscout:blockscout@lux-postgres:5432/stats_luxtest
+      STATS__BLOCKSCOUT_DB_URL: postgresql://blockscout:blockscout@lux-postgres:5432/explorer_luxtest
+      STATS__BLOCKSCOUT_API_URL: http://lux-testnet-backend:4000
+      STATS__CREATE_DATABASE: 'true'
+      STATS__RUN_MIGRATIONS: 'true'
+    ports:
+      - "8152:8050"
+
+networks:
+  hanzo-network:
+    external: true
