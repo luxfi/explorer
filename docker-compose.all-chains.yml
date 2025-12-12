@@ -1,0 +1,233 @@
+# LUX Network Multi-Chain Explorer - All Chains
+# This compose file brings up ALL chain explorers for mainnet
+#
+# Chains:
+# - A-Chain (AI): Custom indexer on port 4500
+# - B-Chain (Bridge): Custom indexer on port 4600
+# - C-Chain (EVM): Blockscout on ports 3000/4000
+# - P-Chain (Platform): Custom indexer on port 4100
+# - Q-Chain (Quantum): Custom indexer on port 4300
+# - T-Chain (Teleport): Custom indexer on port 4700
+# - X-Chain (Exchange): Custom indexer on port 4200
+# - Z-Chain (ZK): Custom indexer on port 4400 (coming soon)
+#
+# Usage: docker-compose -f docker-compose.all-chains.yml up -d
+
+x-indexer-common: &indexer-common
+  image: ghcr.io/luxfi/indexer:${INDEXER_VERSION:-main}
+  pull_policy: always
+  restart: always
+  networks:
+    - hanzo-network
+  extra_hosts:
+    - "host.docker.internal:host-gateway"
+
+services:
+  # ===========================================
+  # A-Chain (AI) - Custom Indexer
+  # ===========================================
+  a-indexer:
+    <<: *indexer-common
+    container_name: 'lux-achain-indexer'
+    command: ["-chain", "achain", "-port", "4000"]
+    ports:
+      - "4500:4000"
+    environment:
+      RPC_ENDPOINT: http://host.docker.internal:9630/ext/bc/A
+      DATABASE_URL: postgresql://blockscout:blockscout@lux-postgres:5432/explorer_achain?sslmode=disable
+      HTTP_PORT: 4000
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:4000/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+  # ===========================================
+  # B-Chain (Bridge) - Custom Indexer
+  # ===========================================
+  b-indexer:
+    <<: *indexer-common
+    container_name: 'lux-bchain-indexer'
+    command: ["-chain", "bchain", "-port", "4000"]
+    ports:
+      - "4600:4000"
+    environment:
+      RPC_ENDPOINT: http://host.docker.internal:9630/ext/bc/B
+      DATABASE_URL: postgresql://blockscout:blockscout@lux-postgres:5432/explorer_bchain?sslmode=disable
+      HTTP_PORT: 4000
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:4000/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+  # ===========================================
+  # C-Chain (EVM) - Blockscout
+  # ===========================================
+  c-backend:
+    image: ghcr.io/blockscout/blockscout:${DOCKER_TAG:-latest}
+    pull_policy: always
+    restart: always
+    container_name: 'lux-cchain-backend'
+    command: sh -c "bin/blockscout eval 'Explorer.ReleaseTasks.create_and_migrate()' && bin/blockscout start"
+    ports:
+      - "4000:4000"
+    networks:
+      - hanzo-network
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    environment:
+      ETHEREUM_JSONRPC_VARIANT: geth
+      ETHEREUM_JSONRPC_HTTP_URL: http://host.docker.internal:9630/ext/bc/C/rpc
+      ETHEREUM_JSONRPC_TRACE_URL: http://host.docker.internal:9630/ext/bc/C/rpc
+      CHAIN_ID: '96369'
+      DATABASE_URL: postgresql://blockscout:blockscout@lux-postgres:5432/explorer_luxnet?sslmode=disable
+      ECTO_USE_SSL: 'false'
+      POOL_SIZE: 40
+      SECRET_KEY_BASE: 56NtB48ear7+wMSf0IQuWDAAazhpb31qyc7GiyspBP2vh7t5zlCsF5QDv76chXeN
+      COIN: LUX
+      PORT: 4000
+      API_V2_ENABLED: 'true'
+
+  c-frontend:
+    image: ghcr.io/blockscout/frontend:${FRONTEND_TAG:-latest}
+    pull_policy: always
+    restart: always
+    container_name: 'lux-cchain-frontend'
+    depends_on:
+      - c-backend
+    ports:
+      - "3000:3000"
+    networks:
+      - hanzo-network
+    environment:
+      NEXT_PUBLIC_API_HOST: api-explore.lux.network
+      NEXT_PUBLIC_API_PROTOCOL: https
+      NEXT_PUBLIC_NETWORK_NAME: "LUX Network"
+      NEXT_PUBLIC_NETWORK_ID: 96369
+      NEXT_PUBLIC_NETWORK_CURRENCY_NAME: LUX
+      NEXT_PUBLIC_NETWORK_CURRENCY_SYMBOL: LUX
+
+  # ===========================================
+  # P-Chain (Platform) - Custom Indexer
+  # ===========================================
+  p-indexer:
+    <<: *indexer-common
+    container_name: 'lux-pchain-indexer'
+    command: ["-chain", "pchain", "-port", "4000"]
+    ports:
+      - "4100:4000"
+    environment:
+      RPC_ENDPOINT: http://host.docker.internal:9630/ext/bc/P
+      DATABASE_URL: postgresql://blockscout:blockscout@lux-postgres:5432/explorer_pchain?sslmode=disable
+      HTTP_PORT: 4000
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:4000/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+  # ===========================================
+  # Q-Chain (Quantum) - Custom Indexer
+  # ===========================================
+  q-indexer:
+    <<: *indexer-common
+    container_name: 'lux-qchain-indexer'
+    command: ["-chain", "qchain", "-port", "4000"]
+    ports:
+      - "4300:4000"
+    environment:
+      RPC_ENDPOINT: http://host.docker.internal:9630/ext/bc/Q
+      DATABASE_URL: postgresql://blockscout:blockscout@lux-postgres:5432/explorer_qchain?sslmode=disable
+      HTTP_PORT: 4000
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:4000/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+  # ===========================================
+  # T-Chain (Teleport) - Custom Indexer
+  # ===========================================
+  t-indexer:
+    <<: *indexer-common
+    container_name: 'lux-tchain-indexer'
+    command: ["-chain", "tchain", "-port", "4000"]
+    ports:
+      - "4700:4000"
+    environment:
+      RPC_ENDPOINT: http://host.docker.internal:9630/ext/bc/T
+      DATABASE_URL: postgresql://blockscout:blockscout@lux-postgres:5432/explorer_tchain?sslmode=disable
+      HTTP_PORT: 4000
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:4000/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+  # ===========================================
+  # X-Chain (Exchange) - Custom Indexer
+  # ===========================================
+  x-indexer:
+    <<: *indexer-common
+    container_name: 'lux-xchain-indexer'
+    command: ["-chain", "xchain", "-port", "4000"]
+    ports:
+      - "4200:4000"
+    environment:
+      RPC_ENDPOINT: http://host.docker.internal:9630/ext/bc/X
+      DATABASE_URL: postgresql://blockscout:blockscout@lux-postgres:5432/explorer_xchain?sslmode=disable
+      HTTP_PORT: 4000
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:4000/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+  # ===========================================
+  # Z-Chain (ZK) - Custom Indexer (Coming Soon)
+  # ===========================================
+  z-indexer:
+    <<: *indexer-common
+    container_name: 'lux-zchain-indexer'
+    command: ["-chain", "zchain", "-port", "4000"]
+    ports:
+      - "4400:4000"
+    environment:
+      RPC_ENDPOINT: http://host.docker.internal:9630/ext/bc/Z
+      DATABASE_URL: postgresql://blockscout:blockscout@lux-postgres:5432/explorer_zchain?sslmode=disable
+      HTTP_PORT: 4000
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:4000/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+    profiles:
+      - future  # Z-Chain not yet live, enable with --profile future
+
+  # ===========================================
+  # Shared Services
+  # ===========================================
+  visualizer:
+    image: ghcr.io/blockscout/visualizer:${VISUALIZER_VERSION:-latest}
+    pull_policy: always
+    restart: always
+    container_name: 'lux-visualizer'
+    networks:
+      - hanzo-network
+    ports:
+      - "8050:8050"
+
+  sig-provider:
+    image: ghcr.io/blockscout/sig-provider:${SIG_PROVIDER_VERSION:-latest}
+    pull_policy: always
+    restart: always
+    container_name: 'lux-sig-provider'
+    networks:
+      - hanzo-network
+    ports:
+      - "8051:8050"
+
+networks:
+  hanzo-network:
+    external: true
