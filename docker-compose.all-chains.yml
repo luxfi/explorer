@@ -14,7 +14,7 @@
 # Usage: docker-compose -f docker-compose.all-chains.yml up -d
 
 x-indexer-common: &indexer-common
-  image: ghcr.io/luxfi/indexer:${INDEXER_VERSION:-main}
+  image: ghcr.io/luxfi/indexer:${INDEXER_VERSION:-0.2.0}
   pull_policy: always
   restart: always
   networks:

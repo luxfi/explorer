@@ -1,0 +1,33 @@
+# LUX X-Chain (Exchange Chain) Explorer - Testnet
+# Assets, UTXOs, Transfers
+# API: api-xchain-test.lux.network -> localhost:4210
+
+services:
+  xchain-indexer:
+    build:
+      context: ../indexers
+      args:
+        CHAIN: xchain
+    image: luxfi/xchain-indexer:latest
+    restart: always
+    container_name: 'lux-xchain-testnet-indexer'
+    ports:
+      - "4210:4000"
+    networks:
+      - hanzo-network
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    environment:
+      RPC_ENDPOINT: http://host.docker.internal:9630/ext/bc/X
+      DATABASE_URL: postgresql://blockscout:blockscout@lux-postgres:5432/explorer_xchain_test?sslmode=disable
+      HTTP_PORT: 4000
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:4000/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 30s
+
+networks:
+  hanzo-network:
+    external: true

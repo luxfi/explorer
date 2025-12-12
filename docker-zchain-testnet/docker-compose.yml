@@ -1,0 +1,33 @@
+# LUX Z/A-Chain (ZK Attestation Chain) Explorer - Testnet
+# AI Attestations, ZK Proofs, Confidential Transfers
+# API: api-zchain-test.lux.network -> localhost:4410
+
+services:
+  zchain-indexer:
+    build:
+      context: ../indexers
+      args:
+        CHAIN: zchain
+    image: luxfi/zchain-indexer:latest
+    restart: always
+    container_name: 'lux-zchain-testnet-indexer'
+    ports:
+      - "4410:4000"
+    networks:
+      - hanzo-network
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    environment:
+      RPC_ENDPOINT: http://host.docker.internal:9630/ext/bc/Z
+      DATABASE_URL: postgresql://blockscout:blockscout@lux-postgres:5432/explorer_zchain_test?sslmode=disable
+      HTTP_PORT: 4000
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:4000/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 30s
+
+networks:
+  hanzo-network:
+    external: true

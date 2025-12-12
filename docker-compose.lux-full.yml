@@ -1,0 +1,320 @@
+# LUX Network Full Explorer Stack
+# All chains (C, P, X, Q, Z) for both Mainnet and Testnet
+#
+# Port Allocation:
+# ================
+# Mainnet: 4000-4499 range
+#   C-Chain: 4000 (backend), 3000 (frontend)
+#   P-Chain: 4100
+#   X-Chain: 4200
+#   Q-Chain: 4300
+#   Z-Chain: 4400
+#
+# Testnet: 4010-4499 range (offset by 10 for C, 110 for others)
+#   C-Chain: 4010 (backend), 3010 (frontend)
+#   P-Chain: 4110
+#   X-Chain: 4210
+#   Q-Chain: 4310
+#   Z-Chain: 4410
+#
+# Usage: docker-compose -f docker-compose.lux-full.yml up -d
+
+services:
+  # ===========================================
+  # MAINNET - C-Chain (EVM)
+  # ===========================================
+  c-mainnet-backend:
+    image: ghcr.io/blockscout/blockscout:${DOCKER_TAG:-latest}
+    pull_policy: always
+    restart: always
+    container_name: 'lux-cchain-mainnet-backend'
+    command: sh -c "bin/blockscout eval 'Explorer.ReleaseTasks.create_and_migrate()' && bin/blockscout start"
+    ports:
+      - "4000:4000"
+    networks:
+      - hanzo-network
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    environment:
+      ETHEREUM_JSONRPC_VARIANT: geth
+      ETHEREUM_JSONRPC_HTTP_URL: http://host.docker.internal:9630/ext/bc/dnmzhuf6poM6PUNQCe7MWWfBdTJEnddhHRNXz2x7H6qSmyBEJ/rpc
+      ETHEREUM_JSONRPC_TRACE_URL: http://host.docker.internal:9630/ext/bc/dnmzhuf6poM6PUNQCe7MWWfBdTJEnddhHRNXz2x7H6qSmyBEJ/rpc
+      CHAIN_ID: '96369'
+      DATABASE_URL: postgresql://blockscout:blockscout@lux-postgres:5432/explorer_luxnet?sslmode=disable
+      ECTO_USE_SSL: 'false'
+      POOL_SIZE: 40
+      SECRET_KEY_BASE: 56NtB48ear7+wMSf0IQuWDAAazhpb31qyc7GiyspBP2vh7t5zlCsF5QDv76chXeN
+      COIN: LUX
+      PORT: 4000
+      API_V2_ENABLED: 'true'
+
+  c-mainnet-frontend:
+    image: ghcr.io/blockscout/frontend:${FRONTEND_TAG:-latest}
+    pull_policy: always
+    restart: always
+    container_name: 'lux-cchain-mainnet-frontend'
+    depends_on:
+      - c-mainnet-backend
+    ports:
+      - "3000:3000"
+    networks:
+      - hanzo-network
+    environment:
+      NEXT_PUBLIC_API_HOST: api-explore.lux.network
+      NEXT_PUBLIC_API_PROTOCOL: https
+      NEXT_PUBLIC_NETWORK_NAME: "LUX Network"
+      NEXT_PUBLIC_NETWORK_ID: 96369
+      NEXT_PUBLIC_NETWORK_CURRENCY_NAME: LUX
+      NEXT_PUBLIC_NETWORK_CURRENCY_SYMBOL: LUX
+      NEXT_PUBLIC_IS_TESTNET: 'false'
+
+  # ===========================================
+  # MAINNET - P-Chain (Platform)
+  # ===========================================
+  p-mainnet-indexer:
+    build:
+      context: ./indexers
+      args:
+        CHAIN: pchain
+    image: luxfi/pchain-indexer:latest
+    restart: always
+    container_name: 'lux-pchain-mainnet-indexer'
+    ports:
+      - "4100:4000"
+    networks:
+      - hanzo-network
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    environment:
+      RPC_ENDPOINT: http://host.docker.internal:9630/ext/bc/P
+      DATABASE_URL: postgresql://blockscout:blockscout@lux-postgres:5432/explorer_pchain?sslmode=disable
+      HTTP_PORT: 4000
+
+  # ===========================================
+  # MAINNET - X-Chain (Exchange)
+  # ===========================================
+  x-mainnet-indexer:
+    build:
+      context: ./indexers
+      args:
+        CHAIN: xchain
+    image: luxfi/xchain-indexer:latest
+    restart: always
+    container_name: 'lux-xchain-mainnet-indexer'
+    ports:
+      - "4200:4000"
+    networks:
+      - hanzo-network
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    environment:
+      RPC_ENDPOINT: http://host.docker.internal:9630/ext/bc/X
+      DATABASE_URL: postgresql://blockscout:blockscout@lux-postgres:5432/explorer_xchain?sslmode=disable
+      HTTP_PORT: 4000
+
+  # ===========================================
+  # MAINNET - Q-Chain (Quantum)
+  # ===========================================
+  q-mainnet-indexer:
+    build:
+      context: ./indexers
+      args:
+        CHAIN: qchain
+    image: luxfi/qchain-indexer:latest
+    restart: always
+    container_name: 'lux-qchain-mainnet-indexer'
+    ports:
+      - "4300:4000"
+    networks:
+      - hanzo-network
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    environment:
+      RPC_ENDPOINT: http://host.docker.internal:9630/ext/bc/Q
+      DATABASE_URL: postgresql://blockscout:blockscout@lux-postgres:5432/explorer_qchain?sslmode=disable
+      HTTP_PORT: 4000
+
+  # ===========================================
+  # MAINNET - Z/A-Chain (Attestation)
+  # ===========================================
+  z-mainnet-indexer:
+    build:
+      context: ./indexers
+      args:
+        CHAIN: zchain
+    image: luxfi/zchain-indexer:latest
+    restart: always
+    container_name: 'lux-zchain-mainnet-indexer'
+    ports:
+      - "4400:4000"
+    networks:
+      - hanzo-network
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    environment:
+      RPC_ENDPOINT: http://host.docker.internal:9630/ext/bc/Z
+      DATABASE_URL: postgresql://blockscout:blockscout@lux-postgres:5432/explorer_zchain?sslmode=disable
+      HTTP_PORT: 4000
+
+  # ===========================================
+  # TESTNET - C-Chain (EVM)
+  # ===========================================
+  c-testnet-backend:
+    image: ghcr.io/blockscout/blockscout:${DOCKER_TAG:-latest}
+    pull_policy: always
+    restart: always
+    container_name: 'lux-cchain-testnet-backend'
+    command: sh -c "bin/blockscout eval 'Explorer.ReleaseTasks.create_and_migrate()' && bin/blockscout start"
+    ports:
+      - "4010:4000"
+    networks:
+      - hanzo-network
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    environment:
+      ETHEREUM_JSONRPC_VARIANT: geth
+      ETHEREUM_JSONRPC_HTTP_URL: http://host.docker.internal:9630/ext/bc/2sdADEgBC3NjLM4inKc1hY1PQpCT3JVyGVJxdmcq6sqrDndjFG/rpc
+      ETHEREUM_JSONRPC_TRACE_URL: http://host.docker.internal:9630/ext/bc/2sdADEgBC3NjLM4inKc1hY1PQpCT3JVyGVJxdmcq6sqrDndjFG/rpc
+      CHAIN_ID: '96368'
+      DATABASE_URL: postgresql://blockscout:blockscout@lux-postgres:5432/explorer_luxtest?sslmode=disable
+      ECTO_USE_SSL: 'false'
+      POOL_SIZE: 40
+      SECRET_KEY_BASE: 56NtB48ear7+wMSf0IQuWDAAazhpb31qyc7GiyspBP2vh7t5zlCsF5QDv76chXeN
+      COIN: LUX
+      PORT: 4000
+      API_V2_ENABLED: 'true'
+
+  c-testnet-frontend:
+    image: ghcr.io/blockscout/frontend:${FRONTEND_TAG:-latest}
+    pull_policy: always
+    restart: always
+    container_name: 'lux-cchain-testnet-frontend'
+    depends_on:
+      - c-testnet-backend
+    ports:
+      - "3010:3000"
+    networks:
+      - hanzo-network
+    environment:
+      NEXT_PUBLIC_API_HOST: api-explore-test.lux.network
+      NEXT_PUBLIC_API_PROTOCOL: https
+      NEXT_PUBLIC_NETWORK_NAME: "LUX Testnet"
+      NEXT_PUBLIC_NETWORK_ID: 96368
+      NEXT_PUBLIC_NETWORK_CURRENCY_NAME: LUX
+      NEXT_PUBLIC_NETWORK_CURRENCY_SYMBOL: LUX
+      NEXT_PUBLIC_IS_TESTNET: 'true'
+
+  # ===========================================
+  # TESTNET - P-Chain (Platform)
+  # ===========================================
+  p-testnet-indexer:
+    build:
+      context: ./indexers
+      args:
+        CHAIN: pchain
+    image: luxfi/pchain-indexer:latest
+    restart: always
+    container_name: 'lux-pchain-testnet-indexer'
+    ports:
+      - "4110:4000"
+    networks:
+      - hanzo-network
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    environment:
+      RPC_ENDPOINT: http://host.docker.internal:9630/ext/bc/P
+      DATABASE_URL: postgresql://blockscout:blockscout@lux-postgres:5432/explorer_pchain_test?sslmode=disable
+      HTTP_PORT: 4000
+
+  # ===========================================
+  # TESTNET - X-Chain (Exchange)
+  # ===========================================
+  x-testnet-indexer:
+    build:
+      context: ./indexers
+      args:
+        CHAIN: xchain
+    image: luxfi/xchain-indexer:latest
+    restart: always
+    container_name: 'lux-xchain-testnet-indexer'
+    ports:
+      - "4210:4000"
+    networks:
+      - hanzo-network
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    environment:
+      RPC_ENDPOINT: http://host.docker.internal:9630/ext/bc/X
+      DATABASE_URL: postgresql://blockscout:blockscout@lux-postgres:5432/explorer_xchain_test?sslmode=disable
+      HTTP_PORT: 4000
+
+  # ===========================================
+  # TESTNET - Q-Chain (Quantum)
+  # ===========================================
+  q-testnet-indexer:
+    build:
+      context: ./indexers
+      args:
+        CHAIN: qchain
+    image: luxfi/qchain-indexer:latest
+    restart: always
+    container_name: 'lux-qchain-testnet-indexer'
+    ports:
+      - "4310:4000"
+    networks:
+      - hanzo-network
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    environment:
+      RPC_ENDPOINT: http://host.docker.internal:9630/ext/bc/Q
+      DATABASE_URL: postgresql://blockscout:blockscout@lux-postgres:5432/explorer_qchain_test?sslmode=disable
+      HTTP_PORT: 4000
+
+  # ===========================================
+  # TESTNET - Z/A-Chain (Attestation)
+  # ===========================================
+  z-testnet-indexer:
+    build:
+      context: ./indexers
+      args:
+        CHAIN: zchain
+    image: luxfi/zchain-indexer:latest
+    restart: always
+    container_name: 'lux-zchain-testnet-indexer'
+    ports:
+      - "4410:4000"
+    networks:
+      - hanzo-network
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    environment:
+      RPC_ENDPOINT: http://host.docker.internal:9630/ext/bc/Z
+      DATABASE_URL: postgresql://blockscout:blockscout@lux-postgres:5432/explorer_zchain_test?sslmode=disable
+      HTTP_PORT: 4000
+
+  # ===========================================
+  # Shared Services
+  # ===========================================
+  visualizer:
+    image: ghcr.io/blockscout/visualizer:${VISUALIZER_VERSION:-latest}
+    pull_policy: always
+    restart: always
+    container_name: 'lux-visualizer'
+    networks:
+      - hanzo-network
+    ports:
+      - "8050:8050"
+
+  sig-provider:
+    image: ghcr.io/blockscout/sig-provider:${SIG_PROVIDER_VERSION:-latest}
+    pull_policy: always
+    restart: always
+    container_name: 'lux-sig-provider'
+    networks:
+      - hanzo-network
+    ports:
+      - "8051:8050"
+
+networks:
+  hanzo-network:
+    external: true

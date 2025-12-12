@@ -1,0 +1,33 @@
+# LUX T-Chain (Teleport Chain) Explorer - Mainnet
+# Cross-chain Messages, Warp Signatures, Transfers
+# API: api-tchain.lux.network -> localhost:4700
+
+services:
+  tchain-indexer:
+    build:
+      context: ../indexers
+      args:
+        CHAIN: tchain
+    image: luxfi/tchain-indexer:latest
+    restart: always
+    container_name: 'lux-tchain-mainnet-indexer'
+    ports:
+      - "4700:4000"
+    networks:
+      - hanzo-network
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    environment:
+      RPC_ENDPOINT: http://host.docker.internal:9630/ext/bc/T
+      DATABASE_URL: postgresql://blockscout:blockscout@lux-postgres:5432/explorer_tchain?sslmode=disable
+      HTTP_PORT: 4000
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:4000/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 30s
+
+networks:
+  hanzo-network:
+    external: true

@@ -1,0 +1,33 @@
+# LUX B-Chain (Bridge Chain) Explorer - Mainnet
+# MPC Signers, Cross-chain Bridges, Epochs
+# API: api-bchain.lux.network -> localhost:4600
+
+services:
+  bchain-indexer:
+    build:
+      context: ../indexers
+      args:
+        CHAIN: bchain
+    image: luxfi/bchain-indexer:latest
+    restart: always
+    container_name: 'lux-bchain-mainnet-indexer'
+    ports:
+      - "4600:4000"
+    networks:
+      - hanzo-network
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    environment:
+      RPC_ENDPOINT: http://host.docker.internal:9630/ext/bc/B
+      DATABASE_URL: postgresql://blockscout:blockscout@lux-postgres:5432/explorer_bchain?sslmode=disable
+      HTTP_PORT: 4000
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:4000/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 30s
+
+networks:
+  hanzo-network:
+    external: true

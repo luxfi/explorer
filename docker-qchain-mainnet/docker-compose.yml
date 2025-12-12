@@ -1,0 +1,33 @@
+# LUX Q-Chain (Quantum Chain) Explorer - Mainnet
+# Quantum Stamps, Finality, Cross-chain Proofs
+# API: api-qchain.lux.network -> localhost:4300
+
+services:
+  qchain-indexer:
+    build:
+      context: ../indexers
+      args:
+        CHAIN: qchain
+    image: luxfi/qchain-indexer:latest
+    restart: always
+    container_name: 'lux-qchain-mainnet-indexer'
+    ports:
+      - "4300:4000"
+    networks:
+      - hanzo-network
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    environment:
+      RPC_ENDPOINT: http://host.docker.internal:9630/ext/bc/Q
+      DATABASE_URL: postgresql://blockscout:blockscout@lux-postgres:5432/explorer_qchain?sslmode=disable
+      HTTP_PORT: 4000
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:4000/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 30s
+
+networks:
+  hanzo-network:
+    external: true
