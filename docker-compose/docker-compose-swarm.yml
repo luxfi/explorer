@@ -1,8 +1,8 @@
 version: '3.9'
 
-# ZOO Network Explorer Services - Docker Swarm Configuration
+# LUX Network Explorer Services - Docker Swarm Configuration
 # Network: hanzo-network
-# Domain: explore.zoo.network
+# Domain: explore.lux.network
 
 x-default-opts: &default-opts
   networks:
@@ -14,7 +14,7 @@ x-default-opts: &default-opts
       max-file: "3"
 
 services:
-  # Redis Service
+  # Redis Service for LUX Explorer
   redis-db:
     <<: *default-opts
     extends:
@@ -32,7 +32,7 @@ services:
         max_attempts: 3
       labels:
         - "traefik.enable=false"
-        - "com.docker.service=explorer-zoonet-redis"
+        - "com.docker.service=explorer-luxnet-redis"
 
   # Database Initialization
   db-init:
@@ -46,7 +46,7 @@ services:
         condition: on-failure
         max_attempts: 1
 
-  # PostgreSQL Database
+  # PostgreSQL Database for LUX Explorer
   db:
     <<: *default-opts
     extends:
@@ -64,11 +64,11 @@ services:
         max_attempts: 3
       labels:
         - "traefik.enable=false"
-        - "com.docker.service=explorer-zoonet-db"
+        - "com.docker.service=explorer-luxnet-db"
     volumes:
-      - zoonet-explorer-db:/var/lib/postgresql/data
+      - luxnet-explorer-db:/var/lib/postgresql/data
 
-  # Backend Service
+  # Backend Service for LUX Explorer
   backend:
     <<: *default-opts
     depends_on:
@@ -83,10 +83,10 @@ services:
       - "host-postgres:192.168.1.99"
       - "host-redis:192.168.1.99"
     environment:
-      ETHEREUM_JSONRPC_HTTP_URL: http://k8s-host:9650/ext/bc/bXe2MhhAnXg6WGj6G8oDk55AKT1dMMsN72S8te7JdvzfZX1zM/rpc
-      ETHEREUM_JSONRPC_TRACE_URL: http://k8s-host:9650/ext/bc/bXe2MhhAnXg6WGj6G8oDk55AKT1dMMsN72S8te7JdvzfZX1zM/rpc
-      ETHEREUM_JSONRPC_WS_URL: ws://k8s-host:9650/ext/bc/bXe2MhhAnXg6WGj6G8oDk55AKT1dMMsN72S8te7JdvzfZX1zM/ws
-      CHAIN_ID: '200200'
+      ETHEREUM_JSONRPC_HTTP_URL: http://k8s-host:9650/ext/bc/dnmzhuf6poM6PUNQCe7MWWfBdTJEnddhHRNXz2x7H6qSmyBEJ/rpc
+      ETHEREUM_JSONRPC_TRACE_URL: http://k8s-host:9650/ext/bc/dnmzhuf6poM6PUNQCe7MWWfBdTJEnddhHRNXz2x7H6qSmyBEJ/rpc
+      ETHEREUM_JSONRPC_WS_URL: ws://k8s-host:9650/ext/bc/dnmzhuf6poM6PUNQCe7MWWfBdTJEnddhHRNXz2x7H6qSmyBEJ/ws
+      CHAIN_ID: '96369'
       DISABLE_INDEXER: 'true'
       DISABLE_REALTIME_INDEXER: 'true'
       DISABLE_CATCHUP_INDEXER: 'true'
@@ -107,12 +107,12 @@ services:
         - "traefik.enable=true"
         - "traefik.docker.network=hanzo-network"
         # API endpoint
-        - "traefik.http.routers.zoonet-explorer-api.rule=Host(`explore.zoo.network`) && PathPrefix(`/api`)"
-        - "traefik.http.routers.zoonet-explorer-api.entrypoints=websecure"
-        - "traefik.http.routers.zoonet-explorer-api.tls=true"
-        - "traefik.http.routers.zoonet-explorer-api.tls.certresolver=letsencrypt"
-        - "traefik.http.services.zoonet-explorer-api.loadbalancer.server.port=4000"
-        - "com.docker.service=explorer-zoonet"
+        - "traefik.http.routers.luxnet-explorer-api.rule=Host(`explore.lux.network`) && PathPrefix(`/api`)"
+        - "traefik.http.routers.luxnet-explorer-api.entrypoints=websecure"
+        - "traefik.http.routers.luxnet-explorer-api.tls=true"
+        - "traefik.http.routers.luxnet-explorer-api.tls.certresolver=letsencrypt"
+        - "traefik.http.services.luxnet-explorer-api.loadbalancer.server.port=4000"
+        - "com.docker.service=explorer-luxnet"
 
   # NFT Media Handler
   nft_media_handler:
@@ -138,7 +138,7 @@ services:
         max_attempts: 3
       labels:
         - "traefik.enable=false"
-        - "com.docker.service=explorer-zoonet-nft-media-handler"
+        - "com.docker.service=explorer-luxnet-nft-media-handler"
 
   # Visualizer Service
   visualizer:
@@ -158,7 +158,7 @@ services:
         max_attempts: 3
       labels:
         - "traefik.enable=false"
-        - "com.docker.service=explorer-zoonet-visualizer"
+        - "com.docker.service=explorer-luxnet-visualizer"
 
   # Signature Provider
   sig-provider:
@@ -178,9 +178,9 @@ services:
         max_attempts: 3
       labels:
         - "traefik.enable=false"
-        - "com.docker.service=explorer-zoonet-sig-provider"
+        - "com.docker.service=explorer-luxnet-sig-provider"
 
-  # Frontend Service
+  # Frontend Service for LUX Explorer
   frontend:
     <<: *default-opts
     depends_on:
@@ -201,17 +201,27 @@ services:
       labels:
         - "traefik.enable=true"
         - "traefik.docker.network=hanzo-network"
-        # Main frontend
-        - "traefik.http.routers.zoonet-explorer.rule=Host(`explore.zoo.network`)"
-        - "traefik.http.routers.zoonet-explorer.entrypoints=websecure"
-        - "traefik.http.routers.zoonet-explorer.tls=true"
-        - "traefik.http.routers.zoonet-explorer.tls.certresolver=letsencrypt"
-        - "traefik.http.services.zoonet-explorer.loadbalancer.server.port=3000"
-        # HTTP to HTTPS redirect
-        - "traefik.http.routers.zoonet-explorer-http.rule=Host(`explore.zoo.network`)"
-        - "traefik.http.routers.zoonet-explorer-http.entrypoints=web"
-        - "traefik.http.routers.zoonet-explorer-http.middlewares=redirect-to-https"
-        - "com.docker.service=explorer-zoonet"
+        # Main frontend - explore.lux.network
+        - "traefik.http.routers.luxnet-explorer.rule=Host(`explore.lux.network`)"
+        - "traefik.http.routers.luxnet-explorer.entrypoints=websecure"
+        - "traefik.http.routers.luxnet-explorer.tls=true"
+        - "traefik.http.routers.luxnet-explorer.tls.certresolver=letsencrypt"
+        - "traefik.http.services.luxnet-explorer.loadbalancer.server.port=3000"
+        # HTTP to HTTPS redirect for explore.lux.network
+        - "traefik.http.routers.luxnet-explorer-http.rule=Host(`explore.lux.network`)"
+        - "traefik.http.routers.luxnet-explorer-http.entrypoints=web"
+        - "traefik.http.routers.luxnet-explorer-http.middlewares=redirect-to-https"
+        # Additional route for lux.exchange
+        - "traefik.http.routers.lux-exchange.rule=Host(`lux.exchange`)"
+        - "traefik.http.routers.lux-exchange.entrypoints=websecure"
+        - "traefik.http.routers.lux-exchange.tls=true"
+        - "traefik.http.routers.lux-exchange.tls.certresolver=letsencrypt"
+        - "traefik.http.routers.lux-exchange.service=luxnet-explorer"
+        # HTTP to HTTPS redirect for lux.exchange
+        - "traefik.http.routers.lux-exchange-http.rule=Host(`lux.exchange`)"
+        - "traefik.http.routers.lux-exchange-http.entrypoints=web"
+        - "traefik.http.routers.lux-exchange-http.middlewares=redirect-to-https"
+        - "com.docker.service=explorer-luxnet"
 
   # Stats Database Initialization
   stats-db-init:
@@ -246,9 +256,9 @@ services:
         max_attempts: 3
       labels:
         - "traefik.enable=false"
-        - "com.docker.service=explorer-zoonet-stats-db"
+        - "com.docker.service=explorer-luxnet-stats-db"
     volumes:
-      - zoonet-explorer-stats-db:/var/lib/postgresql/data
+      - luxnet-explorer-stats-db:/var/lib/postgresql/data
 
   # Stats Service
   stats:
@@ -277,12 +287,12 @@ services:
         - "traefik.enable=true"
         - "traefik.docker.network=hanzo-network"
         # Stats API
-        - "traefik.http.routers.zoonet-stats.rule=Host(`explore.zoo.network`) && PathPrefix(`/stats`)"
-        - "traefik.http.routers.zoonet-stats.entrypoints=websecure"
-        - "traefik.http.routers.zoonet-stats.tls=true"
-        - "traefik.http.routers.zoonet-stats.tls.certresolver=letsencrypt"
-        - "traefik.http.services.zoonet-stats.loadbalancer.server.port=8050"
-        - "com.docker.service=explorer-zoonet-stats"
+        - "traefik.http.routers.luxnet-stats.rule=Host(`explore.lux.network`) && PathPrefix(`/stats`)"
+        - "traefik.http.routers.luxnet-stats.entrypoints=websecure"
+        - "traefik.http.routers.luxnet-stats.tls=true"
+        - "traefik.http.routers.luxnet-stats.tls.certresolver=letsencrypt"
+        - "traefik.http.services.luxnet-stats.loadbalancer.server.port=8050"
+        - "com.docker.service=explorer-luxnet-stats"
 
   # User Operations Indexer
   user-ops-indexer:
@@ -309,7 +319,7 @@ services:
         max_attempts: 3
       labels:
         - "traefik.enable=false"
-        - "com.docker.service=explorer-zoonet-user-ops-indexer"
+        - "com.docker.service=explorer-luxnet-user-ops-indexer"
 
 networks:
   hanzo-network:
@@ -317,7 +327,7 @@ networks:
     attachable: true
 
 volumes:
-  zoonet-explorer-db:
+  luxnet-explorer-db:
     driver: local
-  zoonet-explorer-stats-db:
+  luxnet-explorer-stats-db:
     driver: local

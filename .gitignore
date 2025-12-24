@@ -77,3 +77,13 @@ tasks_in_progress
 /temp
 
 openapi.yaml
+
+# AI assistant config files (symlinks to LLM.md)
+AGENTS.md
+CLAUDE.md
+GEMINI.md
+GROK.md
+QWEN.md
+
+# Docker compose data
+/docker-compose/blockscout-db-data

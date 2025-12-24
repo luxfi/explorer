@@ -23,7 +23,7 @@ services:
       ETHEREUM_JSONRPC_HTTP_URL: http://host.docker.internal:9650/ext/bc/bXe2MhhAnXg6WGj6G8oDk55AKT1dMMsN72S8te7JdvzfZX1zM/rpc
       ETHEREUM_JSONRPC_TRACE_URL: http://host.docker.internal:9650/ext/bc/bXe2MhhAnXg6WGj6G8oDk55AKT1dMMsN72S8te7JdvzfZX1zM/rpc
       ETHEREUM_JSONRPC_WS_URL: ws://host.docker.internal:9650/ext/bc/bXe2MhhAnXg6WGj6G8oDk55AKT1dMMsN72S8te7JdvzfZX1zM/ws
-      CHAIN_ID: '200008'
+      CHAIN_ID: '200200'
       DATABASE_URL: postgresql://blockscout:blockscout@lux-postgres:5432/explorer_zoonet?sslmode=disable
       DISABLE_MIGRATE: 'false'
 
@@ -42,7 +42,7 @@ services:
     environment:
       NEXT_PUBLIC_API_HOST: api-explore.zoo.network
       NEXT_PUBLIC_NETWORK_NAME: "ZOO Network"
-      NEXT_PUBLIC_NETWORK_ID: 200008
+      NEXT_PUBLIC_NETWORK_ID: 200200
       NEXT_PUBLIC_NETWORK_SHORT_NAME: ZOO
       NEXT_PUBLIC_NETWORK_CURRENCY_NAME: ZOO
       NEXT_PUBLIC_NETWORK_CURRENCY_SYMBOL: ZOO
