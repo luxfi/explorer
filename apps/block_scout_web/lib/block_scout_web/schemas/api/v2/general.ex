@@ -73,22 +73,6 @@ defmodule BlockScoutWeb.Schemas.API.V2.General do
     }
   end
 
-  # todo: It should be removed when the frontend stops sending the address_id parameter with the request
-  # https://github.com/blockscout/frontend/issues/3090
-  @doc """
-  Returns a parameter definition for an address hash in the path.
-  """
-  @spec address_id_param() :: Parameter.t()
-  def address_id_param do
-    %Parameter{
-      name: :address_id,
-      in: :query,
-      schema: AddressHash,
-      required: false,
-      description: "Address hash in the query"
-    }
-  end
-
   @doc """
   Returns a parameter definition for the start of the time period.
   """
@@ -255,7 +239,7 @@ defmodule BlockScoutWeb.Schemas.API.V2.General do
     %Parameter{
       name: :block_hash_or_number_param,
       in: :path,
-      schema: %Schema{anyOf: [%Schema{type: :integer}, FullHash]},
+      schema: %Schema{anyOf: [%Schema{type: :integer, minimum: 0}, FullHash]},
       required: true,
       description: "Block hash or number in the path"
     }
@@ -678,6 +662,28 @@ defmodule BlockScoutWeb.Schemas.API.V2.General do
   end
 
   @doc """
+  Returns a parameter definition for API key for sensitive endpoints in the request body.
+  """
+  @spec admin_api_key_request_body() :: OpenApiSpex.RequestBody.t()
+  def admin_api_key_request_body do
+    %OpenApiSpex.RequestBody{
+      content: %{
+        "application/json" => %OpenApiSpex.MediaType{
+          schema: %OpenApiSpex.Schema{
+            type: :object,
+            properties: %{
+              api_key: %Schema{type: :string}
+            },
+            required: [
+              :api_key
+            ]
+          }
+        }
+      }
+    }
+  end
+
+  @doc """
   Returns a parameter definition for reCAPTCHA response token.
   """
   @spec recaptcha_response_param() :: Parameter.t()
@@ -735,6 +741,118 @@ defmodule BlockScoutWeb.Schemas.API.V2.General do
   end
 
   @doc """
+  Returns a parameter definition for MUD world address hash.
+  """
+  @spec world_param() :: Parameter.t()
+  def world_param do
+    %Parameter{
+      name: :world,
+      in: :path,
+      schema: AddressHash,
+      required: true,
+      description: "MUD world address hash in the path"
+    }
+  end
+
+  @doc """
+  Returns a parameter definition for MUD system address hash.
+  """
+  @spec system_param() :: Parameter.t()
+  def system_param do
+    %Parameter{
+      name: :system,
+      in: :path,
+      schema: AddressHash,
+      required: true,
+      description: "MUD system address hash in the path"
+    }
+  end
+
+  @doc """
+  Returns a parameter definition for MUD table ID.
+  """
+  @spec table_id_param() :: Parameter.t()
+  def table_id_param do
+    %Parameter{
+      name: :table_id,
+      in: :path,
+      schema: FullHash,
+      required: true,
+      description: "MUD table ID in the path"
+    }
+  end
+
+  @doc """
+  Returns a parameter definition for MUD record ID.
+  """
+  @spec record_id_param() :: Parameter.t()
+  def record_id_param do
+    %Parameter{
+      name: :record_id,
+      in: :path,
+      schema: HexString,
+      required: true,
+      description: "MUD record ID in the path"
+    }
+  end
+
+  @doc """
+  Returns a parameter definition for MUD tables namespace filter.
+  """
+  @spec filter_namespace_param() :: Parameter.t()
+  def filter_namespace_param do
+    %Parameter{
+      name: :filter_namespace,
+      in: :query,
+      schema: %Schema{type: :string},
+      required: false,
+      description: "Filter by namespace"
+    }
+  end
+
+  @doc """
+  Returns a parameter definition for MUD table records key0 filter.
+  """
+  @spec filter_key0_param() :: Parameter.t()
+  def filter_key0_param do
+    %Parameter{
+      name: :filter_key0,
+      in: :query,
+      schema: %Schema{type: :string},
+      required: false,
+      description: "Filter by key0"
+    }
+  end
+
+  @doc """
+  Returns a parameter definition for MUD table records key1 filter.
+  """
+  @spec filter_key1_param() :: Parameter.t()
+  def filter_key1_param do
+    %Parameter{
+      name: :filter_key1,
+      in: :query,
+      schema: %Schema{type: :string},
+      required: false,
+      description: "Filter by key1"
+    }
+  end
+
+  @doc """
+  Returns a parameter definition for a user operation hash in the path.
+  """
+  @spec operation_hash_param() :: Parameter.t()
+  def operation_hash_param do
+    %Parameter{
+      name: :operation_hash_param,
+      in: :path,
+      schema: FullHash,
+      required: true,
+      description: "User operation hash in the path"
+    }
+  end
+
+  @doc """
   Returns a list of base parameters (api_key and key).
   """
   @spec base_params() :: [Parameter.t()]
@@ -766,6 +884,22 @@ defmodule BlockScoutWeb.Schemas.API.V2.General do
     }
   end
 
+  @doc """
+  Returns a schema definition for a simple message response.
+  """
+  @spec message_response_schema :: Schema.t()
+  def message_response_schema do
+    %Schema{
+      type: :object,
+      properties: %{
+        message: %Schema{type: :string}
+      },
+      required: [:message],
+      nullable: false,
+      additionalProperties: false
+    }
+  end
+
   # `%Schema{anyOf: [%Schema{type: :integer}, EmptyString]}` is used because,
   # `allowEmptyValue: true` does not allow empty string for some reasons (at least in this case)
 
@@ -791,12 +925,26 @@ defmodule BlockScoutWeb.Schemas.API.V2.General do
       required: false,
       description: "Block number for paging"
     },
+    "l1_block_number" => %Parameter{
+      name: :l1_block_number,
+      in: :query,
+      schema: %Schema{type: :integer, minimum: 0},
+      required: false,
+      description: "L1 block number for paging"
+    },
     "epoch_number" => %Parameter{
       name: :epoch_number,
       in: :query,
       schema: IntegerString,
       required: false,
       description: "Epoch number for paging"
+    },
+    "nonce" => %Parameter{
+      name: :nonce,
+      in: :query,
+      schema: IntegerString,
+      required: false,
+      description: "Nonce for paging"
     },
     "index" => %Parameter{
       name: :index,
@@ -828,6 +976,13 @@ defmodule BlockScoutWeb.Schemas.API.V2.General do
     },
     "hash" => %Parameter{
       name: :hash,
+      in: :query,
+      schema: FullHash,
+      required: false,
+      description: "Transaction hash for paging"
+    },
+    "transaction_hash" => %Parameter{
+      name: :transaction_hash,
       in: :query,
       schema: FullHash,
       required: false,
@@ -1080,6 +1235,55 @@ defmodule BlockScoutWeb.Schemas.API.V2.General do
       schema: %Schema{type: :integer, nullable: true},
       required: false,
       description: "State changes for paging"
+    },
+    "world" => %Parameter{
+      name: :world,
+      in: :query,
+      schema: AddressHash,
+      required: false,
+      description: "MUD world address hash for paging"
+    },
+    "table_id" => %Parameter{
+      name: :table_id,
+      in: :query,
+      schema: FullHash,
+      required: false,
+      description: "MUD table ID for paging"
+    },
+    "key_bytes" => %Parameter{
+      name: :key_bytes,
+      in: :query,
+      schema: HexString,
+      required: false,
+      description: "MUD record key_bytes for paging"
+    },
+    "key0" => %Parameter{
+      name: :key0,
+      in: :query,
+      schema: FullHash,
+      required: false,
+      description: "MUD record key0 for paging"
+    },
+    "key1" => %Parameter{
+      name: :key1,
+      in: :query,
+      schema: FullHash,
+      required: false,
+      description: "MUD record key1 for paging"
+    },
+    "page_size" => %Parameter{
+      name: :page_size,
+      in: :query,
+      schema: %Schema{type: :integer, minimum: 1, maximum: 50},
+      required: false,
+      description: "Number of items returned per page"
+    },
+    "page_token" => %Parameter{
+      name: :page_token,
+      in: :query,
+      schema: %Schema{type: :string},
+      required: false,
+      description: "Page token for paging"
     }
   }
 

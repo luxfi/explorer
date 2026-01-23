@@ -18,10 +18,11 @@ defmodule Indexer.Fetcher.TokenBalance do
 
   require Logger
 
+  alias EthereumJSONRPC.Utility.RangesHelper
   alias Explorer.Chain
   alias Explorer.Chain.Address.{CurrentTokenBalance, TokenBalance}
   alias Explorer.Chain.Events.Publisher
-  alias Explorer.Chain.Hash
+  alias Explorer.Chain.{Hash, Token}
   alias Explorer.Utility.MissingBalanceOfToken
   alias Indexer.{BufferedTask, TokenBalances, Tracer}
   alias Indexer.Fetcher.TokenBalance.Supervisor, as: TokenBalanceSupervisor
@@ -49,7 +50,12 @@ defmodule Indexer.Fetcher.TokenBalance do
     if TokenBalanceSupervisor.disabled?() do
       :ok
     else
-      formatted_params = Enum.map(token_balances, &entry/1)
+      filtered_balances =
+        token_balances
+        |> RangesHelper.filter_by_block_ranges()
+        |> RangesHelper.filter_traceable_block_numbers()
+
+      formatted_params = Enum.map(filtered_balances, &entry/1)
 
       BufferedTask.buffer(__MODULE__, formatted_params, realtime?, :infinity)
     end
@@ -75,14 +81,21 @@ defmodule Indexer.Fetcher.TokenBalance do
 
   @impl BufferedTask
   def init(initial, reducer, _) do
+    entry_reducer = fn token_balance, acc ->
+      token_balance
+      |> entry()
+      |> reducer.(acc)
+    end
+
+    stream_reducer =
+      entry_reducer
+      |> RangesHelper.stream_reducer_by_block_ranges()
+      |> RangesHelper.stream_reducer_traceable()
+
     {:ok, final} =
-      Chain.stream_unfetched_token_balances(
+      TokenBalance.stream_unfetched_token_balances(
         initial,
-        fn token_balance, acc ->
-          token_balance
-          |> entry()
-          |> reducer.(acc)
-        end,
+        stream_reducer,
         true
       )
 
@@ -262,7 +275,7 @@ defmodule Indexer.Fetcher.TokenBalance do
   end
 
   defp put_token_type_to_balance_object(token_balance) do
-    token_type = Chain.get_token_type(token_balance.token_contract_address_hash)
+    token_type = Token.get_token_type(token_balance.token_contract_address_hash)
 
     if token_type do
       Map.put(token_balance, :token_type, token_type)

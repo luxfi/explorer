@@ -17,7 +17,6 @@ defmodule Explorer.Application do
     MinMissingBlockNumber,
     StateChanges,
     Transactions,
-    TransactionsApiV2,
     Uncles
   }
 
@@ -28,6 +27,7 @@ defmodule Explorer.Application do
     BlocksCount,
     GasUsageSum,
     PendingBlockOperationCount,
+    PendingTransactionOperationCount,
     TransactionsCount
   }
 
@@ -39,6 +39,7 @@ defmodule Explorer.Application do
   alias Explorer.Prometheus.Instrumenter
   alias Explorer.Repo.PrometheusLogger
   alias Explorer.Utility.Hammer
+  alias Utils.ConfigHelper
 
   @impl Application
   def start(_type, _args) do
@@ -84,16 +85,15 @@ defmodule Explorer.Application do
       GasPriceOracle,
       GasUsageSum,
       PendingBlockOperationCount,
+      PendingTransactionOperationCount,
       TransactionsCount,
       StateChanges,
       Transactions,
-      TransactionsApiV2,
       Uncles,
       AddressTabsElementsCount,
       con_cache_child_spec(MarketHistoryCache.cache_name()),
       con_cache_child_spec(RSK.cache_name(), ttl_check_interval: :timer.minutes(1), global_ttl: :timer.minutes(30)),
       {Redix, redix_opts()},
-      {Explorer.Utility.MissingRangesManipulator, []},
       {Explorer.Utility.ReplicaAccessibilityManager, []},
       :hackney_pool.child_spec(:default,
         recv_timeout: 60_000,
@@ -203,6 +203,11 @@ defmodule Explorer.Application do
         configure_mode_dependent_process(Explorer.Migrator.SanitizeDuplicateSmartContractAdditionalSources, :indexer),
         configure_mode_dependent_process(Explorer.Migrator.DeleteZeroValueInternalTransactions, :indexer),
         configure_mode_dependent_process(
+          Explorer.Migrator.FillInternalTransactionToAddressHashWithCreatedContractAddressHash,
+          :indexer
+        ),
+        configure_mode_dependent_process(Explorer.Migrator.EmptyInternalTransactionsData, :indexer),
+        configure_mode_dependent_process(
           Explorer.Migrator.HeavyDbIndexOperation.CreateAddressesVerifiedIndex,
           :indexer
         ),
@@ -309,7 +314,7 @@ defmodule Explorer.Application do
           :indexer
         ),
         configure_mode_dependent_process(
-          Explorer.Migrator.HeavyDbIndexOperation.CreateInternalTransactionsBlockHashTransactionIndexIndexUniqueIndex,
+          Explorer.Migrator.HeavyDbIndexOperation.CreateInternalTransactionsBlockNumberTransactionIndexIndexUniqueIndex,
           :indexer
         ),
         configure_mode_dependent_process(
@@ -324,11 +329,28 @@ defmodule Explorer.Application do
           Explorer.Migrator.HeavyDbIndexOperation.DropTokenInstancesTokenIdIndex,
           :indexer
         ),
+        configure_mode_dependent_process(
+          Explorer.Migrator.HeavyDbIndexOperation.DropInternalTransactionsCreatedContractAddressHashPartialIndex,
+          :indexer
+        ),
+        configure_mode_dependent_process(
+          Explorer.Migrator.HeavyDbIndexOperation.CreateTokensNamePartialFtsIndex,
+          :indexer
+        ),
+        configure_mode_dependent_process(
+          Explorer.Migrator.HeavyDbIndexOperation.UpdateInternalTransactionsPrimaryKey,
+          :indexer
+        ),
+        configure_mode_dependent_process(
+          Explorer.Migrator.HeavyDbIndexOperation.DropInternalTransactionsBlockHashTransactionIndexIndexIndex,
+          :indexer
+        ),
         Explorer.Migrator.RefetchContractCodes |> configure() |> configure_chain_type_dependent_process(:zksync),
         configure(Explorer.Chain.Fetcher.AddressesBlacklist),
         Explorer.Migrator.SwitchPendingOperations,
         configure_mode_dependent_process(Explorer.Utility.RateLimiter, :api),
         Hammer.child_for_supervisor() |> configure_mode_dependent_process(:api),
+        configure_mode_dependent_process(Explorer.ThirdPartyIntegrations.Dynamic.Strategy, :api),
         # keep at the end
         configure_libcluster()
       ]
@@ -497,7 +519,7 @@ defmodule Explorer.Application do
   end
 
   defp redix_opts do
-    {System.get_env("ACCOUNT_REDIS_URL") || "redis://127.0.0.1:6379", [name: :redix]}
+    {ConfigHelper.parse_url_env_var("ACCOUNT_REDIS_URL", "redis://127.0.0.1:6379"), [name: :redix]}
   end
 
   defp configure_libcluster do

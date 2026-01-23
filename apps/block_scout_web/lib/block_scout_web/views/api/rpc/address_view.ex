@@ -3,7 +3,7 @@ defmodule BlockScoutWeb.API.RPC.AddressView do
 
   alias BlockScoutWeb.API.EthRPC.View, as: EthRPCView
   alias BlockScoutWeb.API.RPC.RPCView
-  alias Explorer.Chain.{DenormalizationHelper, Transaction}
+  alias Explorer.Chain.{DenormalizationHelper, InternalTransaction, Transaction}
 
   def render("listaccounts.json", %{accounts: accounts}) do
     accounts = Enum.map(accounts, &prepare_account/1)
@@ -74,6 +74,11 @@ defmodule BlockScoutWeb.API.RPC.AddressView do
     EthRPCView.render("error.json", %{error: message, id: 0})
   end
 
+  def render("pending_internal_transaction.json", %{data: data} = assigns) do
+    prepared_internal_transactions = Enum.map(data, &prepare_internal_transaction/1)
+    RPCView.render("pending_internal_transaction.json", Map.put(assigns, :data, prepared_internal_transactions))
+  end
+
   def render("error.json", assigns) do
     RPCView.render("error.json", assigns)
   end
@@ -134,6 +139,8 @@ defmodule BlockScoutWeb.API.RPC.AddressView do
     }
   end
 
+  # Prepares an internal transaction for API response.
+  @spec prepare_internal_transaction(InternalTransaction.t()) :: map()
   defp prepare_internal_transaction(internal_transaction) do
     %{
       "blockNumber" => "#{internal_transaction.block_number}",
@@ -146,8 +153,8 @@ defmodule BlockScoutWeb.API.RPC.AddressView do
       "index" => to_string(internal_transaction.index),
       "input" => "#{internal_transaction.input}",
       "type" => "#{internal_transaction.type}",
-      "callType" => "#{internal_transaction.call_type}",
-      "gas" => "#{internal_transaction.gas}",
+      "callType" => "#{InternalTransaction.call_type(internal_transaction)}",
+      "gas" => to_string(internal_transaction.gas || 0),
       "gasUsed" => "#{internal_transaction.gas_used}",
       "isError" => if(internal_transaction.error, do: "1", else: "0"),
       "errCode" => "#{internal_transaction.error}"

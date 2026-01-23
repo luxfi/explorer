@@ -2232,7 +2232,6 @@ defmodule BlockScoutWeb.API.V2.AddressControllerTest do
           block_number: transaction.block_number,
           transaction_index: transaction.index,
           block_hash: transaction.block_hash,
-          block_index: 1,
           from_address: address
         )
 
@@ -2243,7 +2242,6 @@ defmodule BlockScoutWeb.API.V2.AddressControllerTest do
           block_number: transaction.block_number,
           transaction_index: transaction.index,
           block_hash: transaction.block_hash,
-          block_index: 2,
           to_address: address
         )
 
@@ -2272,6 +2270,34 @@ defmodule BlockScoutWeb.API.V2.AddressControllerTest do
       compare_item(internal_transaction_to, Enum.at(response["items"], 0))
     end
 
+    test "returns gas_limit as 0 for selfdestruct without gas", %{conn: conn} do
+      address = insert(:address)
+
+      transaction =
+        :transaction
+        |> insert(from_address: address)
+        |> with_block()
+
+      internal_transaction =
+        insert(:internal_transaction_selfdestruct,
+          transaction: transaction,
+          index: 1,
+          block_number: transaction.block_number,
+          transaction_index: transaction.index,
+          block_hash: transaction.block_hash,
+          from_address: address,
+          to_address: insert(:address),
+          gas: nil,
+          gas_used: nil
+        )
+
+      request = get(conn, "/api/v2/addresses/#{address.hash}/internal-transactions")
+
+      assert %{"items" => [item], "next_page_params" => nil} = json_response(request, 200)
+      assert "0" == to_string(item["gas_limit"])
+      assert item["index"] == internal_transaction.index
+    end
+
     test "internal transactions can paginate", %{conn: conn} do
       address = insert(:address)
 
@@ -2288,7 +2314,6 @@ defmodule BlockScoutWeb.API.V2.AddressControllerTest do
             block_number: transaction.block_number,
             transaction_index: transaction.index,
             block_hash: transaction.block_hash,
-            block_index: i,
             from_address: address
           )
         end
@@ -2311,7 +2336,6 @@ defmodule BlockScoutWeb.API.V2.AddressControllerTest do
             block_number: transaction.block_number,
             transaction_index: transaction.index,
             block_hash: transaction.block_hash,
-            block_index: i,
             to_address: address
           )
         end
@@ -2592,12 +2616,12 @@ defmodule BlockScoutWeb.API.V2.AddressControllerTest do
         type: "call",
         call_type: "call",
         transaction: transaction,
+        transaction_index: transaction.index,
         block: transaction.block,
         to_address: address,
         value: 123,
         block_number: transaction.block_number,
-        index: 1,
-        block_index: 1
+        index: 1
       )
 
       insert(:address_coin_balance)
@@ -3859,7 +3883,6 @@ defmodule BlockScoutWeb.API.V2.AddressControllerTest do
           block_number: transaction.block_number,
           transaction_index: transaction.index,
           block_hash: transaction.block_hash,
-          block_index: x,
           to_address: address
         )
       end
@@ -3903,7 +3926,6 @@ defmodule BlockScoutWeb.API.V2.AddressControllerTest do
           block_number: transaction.block_number,
           transaction_index: transaction.index,
           block_hash: transaction.block_hash,
-          block_index: x,
           from_address: address
         )
       end
@@ -3957,7 +3979,6 @@ defmodule BlockScoutWeb.API.V2.AddressControllerTest do
           block_number: transaction.block_number,
           transaction_index: transaction.index,
           block_hash: transaction.block_hash,
-          block_index: x,
           from_address: address
         )
       end
@@ -4005,7 +4026,6 @@ defmodule BlockScoutWeb.API.V2.AddressControllerTest do
           block_number: transaction.block_number,
           transaction_index: transaction.index,
           block_hash: transaction.block_hash,
-          block_index: x,
           from_address: address
         )
       end
@@ -5604,6 +5624,7 @@ defmodule BlockScoutWeb.API.V2.AddressControllerTest do
     assert to_string(log.transaction_hash) == json["transaction_hash"]
     assert json["block_number"] == log.block_number
     assert json["block_hash"] == to_string(log.block_hash)
+    assert json["block_timestamp"] != nil
   end
 
   defp compare_item(%Withdrawal{} = withdrawal, json) do
