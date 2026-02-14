@@ -87,3 +87,5 @@ QWEN.md
 
 # Docker compose data
 /docker-compose/blockscout-db-data
+final-check.js
+inspect-*.js
