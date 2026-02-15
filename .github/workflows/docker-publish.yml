@@ -9,7 +9,7 @@ on:
 
 env:
   REGISTRY: ghcr.io
-  IMAGE_NAME: luxfi/explorer
+  IMAGE_NAME: luxfi/lux-explorer
 
 jobs:
   build-and-push:
