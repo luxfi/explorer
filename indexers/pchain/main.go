@@ -228,16 +228,16 @@ func (idx *Indexer) FetchCurrentValidators(ctx context.Context) error {
 
 	var response struct {
 		Validators []struct {
-			NodeID          string  `json:"nodeID"`
-			StartTime       string  `json:"startTime"`
-			EndTime         string  `json:"endTime"`
-			StakeAmount     string  `json:"stakeAmount"`
-			Weight          string  `json:"weight"`
-			ValidationID    string  `json:"validationID"`
-			Connected       bool    `json:"connected"`
-			Uptime          string  `json:"uptime"`
-			DelegatorCount  int     `json:"delegatorCount"`
-			DelegatorWeight string  `json:"delegatorWeight"`
+			NodeID          string `json:"nodeID"`
+			StartTime       string `json:"startTime"`
+			EndTime         string `json:"endTime"`
+			StakeAmount     string `json:"stakeAmount"`
+			Weight          string `json:"weight"`
+			ValidationID    string `json:"validationID"`
+			Connected       bool   `json:"connected"`
+			Uptime          string `json:"uptime"`
+			DelegatorCount  int    `json:"delegatorCount"`
+			DelegatorWeight string `json:"delegatorWeight"`
 		} `json:"validators"`
 	}
 
@@ -455,7 +455,7 @@ func (idx *Indexer) handleBlocks(w http.ResponseWriter, r *http.Request) {
 	}
 
 	json.NewEncoder(w).Encode(map[string]interface{}{
-		"items":      blocks,
+		"items":            blocks,
 		"next_page_params": nil,
 	})
 }

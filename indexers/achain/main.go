@@ -60,15 +60,15 @@ type Task struct {
 
 // Attestation represents a TEE/GPU attestation
 type Attestation struct {
-	ID           string    `json:"id"`
-	ProviderID   string    `json:"providerId"`
-	Type         string    `json:"type"` // TEE, GPU, Hybrid
-	TrustScore   uint8     `json:"trustScore"`
-	Platform     string    `json:"platform"` // SGX, SEV-SNP, TDX, nvtrust
-	Quote        string    `json:"quote,omitempty"`
-	Verified     bool      `json:"verified"`
-	VerifiedAt   time.Time `json:"verifiedAt"`
-	ExpiresAt    time.Time `json:"expiresAt"`
+	ID         string    `json:"id"`
+	ProviderID string    `json:"providerId"`
+	Type       string    `json:"type"` // TEE, GPU, Hybrid
+	TrustScore uint8     `json:"trustScore"`
+	Platform   string    `json:"platform"` // SGX, SEV-SNP, TDX, nvtrust
+	Quote      string    `json:"quote,omitempty"`
+	Verified   bool      `json:"verified"`
+	VerifiedAt time.Time `json:"verifiedAt"`
+	ExpiresAt  time.Time `json:"expiresAt"`
 }
 
 // Block represents an A-Chain block
@@ -237,10 +237,10 @@ func (idx *Indexer) FetchProviders(ctx context.Context) error {
 
 	var response struct {
 		Providers []struct {
-			ID             string   `json:"id"`
-			WalletAddress  string   `json:"wallet_address"`
-			Endpoint       string   `json:"endpoint"`
-			GPUs           []struct {
+			ID            string `json:"id"`
+			WalletAddress string `json:"wallet_address"`
+			Endpoint      string `json:"endpoint"`
+			GPUs          []struct {
 				Model string `json:"model"`
 			} `json:"gpus"`
 			GPUAttestation interface{} `json:"gpu_attestation"`
@@ -356,14 +356,14 @@ func corsMiddleware(next http.Handler) http.Handler {
 
 func (idx *Indexer) handleStats(w http.ResponseWriter, r *http.Request) {
 	var stats struct {
-		TotalBlocks      int64  `json:"total_blocks"`
-		TotalProviders   int64  `json:"total_providers"`
-		ActiveProviders  int64  `json:"active_providers"`
-		TotalTasks       int64  `json:"total_tasks"`
-		CompletedTasks   int64  `json:"completed_tasks"`
-		TotalRewards     string `json:"total_rewards"`
-		TotalModels      int64  `json:"total_models"`
-		LastHeight       uint64 `json:"last_height"`
+		TotalBlocks     int64  `json:"total_blocks"`
+		TotalProviders  int64  `json:"total_providers"`
+		ActiveProviders int64  `json:"active_providers"`
+		TotalTasks      int64  `json:"total_tasks"`
+		CompletedTasks  int64  `json:"completed_tasks"`
+		TotalRewards    string `json:"total_rewards"`
+		TotalModels     int64  `json:"total_models"`
+		LastHeight      uint64 `json:"last_height"`
 	}
 
 	idx.db.QueryRow("SELECT COUNT(*) FROM achain_blocks").Scan(&stats.TotalBlocks)
