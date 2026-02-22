@@ -60,14 +60,14 @@ var DefaultConfigs = map[ChainType]ChainConfig{
 
 // Vertex represents a node in the DAG (transaction, block, etc.)
 type Vertex struct {
-	ID         string                 `json:"id"`
-	Type       string                 `json:"type"`
-	ParentIDs  []string               `json:"parentIds,omitempty"`
-	Timestamp  time.Time              `json:"timestamp"`
-	Status     VertexStatus           `json:"status"`
-	Data       json.RawMessage        `json:"data,omitempty"`
-	Metadata   map[string]interface{} `json:"metadata,omitempty"`
-	ChainType  ChainType              `json:"chainType"`
+	ID        string                 `json:"id"`
+	Type      string                 `json:"type"`
+	ParentIDs []string               `json:"parentIds,omitempty"`
+	Timestamp time.Time              `json:"timestamp"`
+	Status    VertexStatus           `json:"status"`
+	Data      json.RawMessage        `json:"data,omitempty"`
+	Metadata  map[string]interface{} `json:"metadata,omitempty"`
+	ChainType ChainType              `json:"chainType"`
 }
 
 // VertexStatus represents the consensus status of a vertex

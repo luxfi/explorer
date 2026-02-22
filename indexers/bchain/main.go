@@ -47,16 +47,16 @@ type BridgeRequest struct {
 
 // Signer represents an MPC signer in the bridge
 type Signer struct {
-	NodeID      string    `json:"nodeId"`
-	PartyID     string    `json:"partyId"`
-	SlotIndex   int       `json:"slotIndex"`
-	BondAmount  string    `json:"bondAmount"` // 100M LUX bond (slashable)
-	Active      bool      `json:"active"`
-	Slashed     bool      `json:"slashed"`
-	SlashCount  int       `json:"slashCount"`
-	MPCPubKey   string    `json:"mpcPubKey,omitempty"`
-	JoinedAt    time.Time `json:"joinedAt"`
-	LastSeen    time.Time `json:"lastSeen"`
+	NodeID     string    `json:"nodeId"`
+	PartyID    string    `json:"partyId"`
+	SlotIndex  int       `json:"slotIndex"`
+	BondAmount string    `json:"bondAmount"` // 100M LUX bond (slashable)
+	Active     bool      `json:"active"`
+	Slashed    bool      `json:"slashed"`
+	SlashCount int       `json:"slashCount"`
+	MPCPubKey  string    `json:"mpcPubKey,omitempty"`
+	JoinedAt   time.Time `json:"joinedAt"`
+	LastSeen   time.Time `json:"lastSeen"`
 }
 
 // SignerSet represents the current MPC signer set
@@ -437,16 +437,16 @@ func corsMiddleware(next http.Handler) http.Handler {
 
 func (idx *Indexer) handleStats(w http.ResponseWriter, r *http.Request) {
 	var stats struct {
-		TotalBlocks       int64  `json:"total_blocks"`
-		TotalSigners      int64  `json:"total_signers"`
-		ActiveSigners     int64  `json:"active_signers"`
-		TotalBridges      int64  `json:"total_bridges"`
-		PendingBridges    int64  `json:"pending_bridges"`
-		CompletedBridges  int64  `json:"completed_bridges"`
-		TotalVolume       string `json:"total_volume"`
-		CurrentThreshold  int    `json:"current_threshold"`
-		CurrentEpoch      uint64 `json:"current_epoch"`
-		LastHeight        uint64 `json:"last_height"`
+		TotalBlocks      int64  `json:"total_blocks"`
+		TotalSigners     int64  `json:"total_signers"`
+		ActiveSigners    int64  `json:"active_signers"`
+		TotalBridges     int64  `json:"total_bridges"`
+		PendingBridges   int64  `json:"pending_bridges"`
+		CompletedBridges int64  `json:"completed_bridges"`
+		TotalVolume      string `json:"total_volume"`
+		CurrentThreshold int    `json:"current_threshold"`
+		CurrentEpoch     uint64 `json:"current_epoch"`
+		LastHeight       uint64 `json:"last_height"`
 	}
 
 	idx.db.QueryRow("SELECT COUNT(*) FROM bchain_blocks").Scan(&stats.TotalBlocks)

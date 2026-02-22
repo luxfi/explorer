@@ -60,14 +60,14 @@ type UTXO struct {
 
 // Transaction represents an X-Chain transaction
 type Transaction struct {
-	ID          string          `json:"id"`
-	Type        string          `json:"type"` // base, create_asset, operation, import, export
-	Timestamp   time.Time       `json:"timestamp"`
-	Fee         string          `json:"fee"`
-	Inputs      json.RawMessage `json:"inputs"`
-	Outputs     json.RawMessage `json:"outputs"`
-	Memo        string          `json:"memo,omitempty"`
-	Status      string          `json:"status"`
+	ID        string          `json:"id"`
+	Type      string          `json:"type"` // base, create_asset, operation, import, export
+	Timestamp time.Time       `json:"timestamp"`
+	Fee       string          `json:"fee"`
+	Inputs    json.RawMessage `json:"inputs"`
+	Outputs   json.RawMessage `json:"outputs"`
+	Memo      string          `json:"memo,omitempty"`
+	Status    string          `json:"status"`
 }
 
 // AddressBalance represents balances for an address
@@ -324,7 +324,7 @@ func (idx *Indexer) FetchTxFee(ctx context.Context) (uint64, uint64, error) {
 	}
 
 	var response struct {
-		TxFee        string `json:"txFee"`
+		TxFee         string `json:"txFee"`
 		CreationTxFee string `json:"creationTxFee"`
 	}
 	if err := json.Unmarshal(result, &response); err != nil {

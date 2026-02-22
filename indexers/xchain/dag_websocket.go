@@ -39,12 +39,12 @@ type DAGMessage struct {
 
 // DAGSubscriber handles WebSocket connections for DAG streaming
 type DAGSubscriber struct {
-	clients   map[*websocket.Conn]bool
-	broadcast chan DAGMessage
-	register  chan *websocket.Conn
+	clients    map[*websocket.Conn]bool
+	broadcast  chan DAGMessage
+	register   chan *websocket.Conn
 	unregister chan *websocket.Conn
-	mu        sync.RWMutex
-	upgrader  websocket.Upgrader
+	mu         sync.RWMutex
+	upgrader   websocket.Upgrader
 }
 
 // NewDAGSubscriber creates a new DAG subscriber

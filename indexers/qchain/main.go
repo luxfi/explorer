@@ -30,16 +30,16 @@ type Config struct {
 
 // QuantumStamp represents a Q-Chain quantum stamp (cross-chain finality proof)
 type QuantumStamp struct {
-	ID               string    `json:"id"`
-	CChainBlockHash  string    `json:"cChainBlockHash"`
-	CChainBlockNum   uint64    `json:"cChainBlockNum"`
-	QChainBlockHash  string    `json:"qChainBlockHash"`
-	QChainBlockNum   uint64    `json:"qChainBlockNum"`
-	StampMode        string    `json:"stampMode"` // MLDSA44, MLDSA65, MLDSA87, SLHDSA, Hybrid
-	Signature        string    `json:"signature"`
-	PublicKey        string    `json:"publicKey,omitempty"`
-	Timestamp        time.Time `json:"timestamp"`
-	Verified         bool      `json:"verified"`
+	ID              string    `json:"id"`
+	CChainBlockHash string    `json:"cChainBlockHash"`
+	CChainBlockNum  uint64    `json:"cChainBlockNum"`
+	QChainBlockHash string    `json:"qChainBlockHash"`
+	QChainBlockNum  uint64    `json:"qChainBlockNum"`
+	StampMode       string    `json:"stampMode"` // MLDSA44, MLDSA65, MLDSA87, SLHDSA, Hybrid
+	Signature       string    `json:"signature"`
+	PublicKey       string    `json:"publicKey,omitempty"`
+	Timestamp       time.Time `json:"timestamp"`
+	Verified        bool      `json:"verified"`
 }
 
 // QuantumBlock represents a Q-Chain block
@@ -370,12 +370,12 @@ func corsMiddleware(next http.Handler) http.Handler {
 
 func (idx *Indexer) handleStats(w http.ResponseWriter, r *http.Request) {
 	var stats struct {
-		TotalBlocks       int64  `json:"total_blocks"`
-		TotalTransactions int64  `json:"total_transactions"`
-		TotalStamps       int64  `json:"total_stamps"`
-		VerifiedStamps    int64  `json:"verified_stamps"`
-		TotalKeys         int64  `json:"total_keys"`
-		LastHeight        uint64 `json:"last_height"`
+		TotalBlocks       int64            `json:"total_blocks"`
+		TotalTransactions int64            `json:"total_transactions"`
+		TotalStamps       int64            `json:"total_stamps"`
+		VerifiedStamps    int64            `json:"verified_stamps"`
+		TotalKeys         int64            `json:"total_keys"`
+		LastHeight        uint64           `json:"last_height"`
 		StampModes        map[string]int64 `json:"stamp_modes"`
 	}
 
