@@ -744,10 +744,16 @@ defmodule BlockScoutWeb.API.V2.TokenControllerTest do
           insert(:token, type: "ERC-404")
         end
 
+      erc_7984_tokens =
+        for _i <- 0..50 do
+          insert(:token, type: "ERC-7984")
+        end
+
       check_tokens_pagination(erc_20_tokens, conn, %{"type" => "ERC-20"})
       check_tokens_pagination(erc_721_tokens |> Enum.reverse(), conn, %{"type" => "ERC-721"})
       check_tokens_pagination(erc_1155_tokens |> Enum.reverse(), conn, %{"type" => "ERC-1155"})
       check_tokens_pagination(erc_404_tokens |> Enum.reverse(), conn, %{"type" => "ERC-404"})
+      check_tokens_pagination(erc_7984_tokens |> Enum.reverse(), conn, %{"type" => "ERC-7984"})
     end
 
     test "tokens are filtered by multiple type", %{conn: conn} do
@@ -771,6 +777,11 @@ defmodule BlockScoutWeb.API.V2.TokenControllerTest do
           insert(:token, type: "ERC-404")
         end
 
+      erc_7984_tokens =
+        for _i <- 0..24 do
+          insert(:token, type: "ERC-7984")
+        end
+
       check_tokens_pagination(
         erc_721_tokens |> Kernel.++(erc_1155_tokens) |> Enum.reverse(),
         conn,
@@ -792,6 +803,14 @@ defmodule BlockScoutWeb.API.V2.TokenControllerTest do
         conn,
         %{
           "type" => "[erc-20,ERC-404]"
+        }
+      )
+
+      check_tokens_pagination(
+        erc_7984_tokens |> Enum.reverse() |> Kernel.++(erc_20_tokens),
+        conn,
+        %{
+          "type" => "[erc-20,ERC-7984]"
         }
       )
     end
@@ -2134,7 +2153,8 @@ defmodule BlockScoutWeb.API.V2.TokenControllerTest do
         |> put_req_header("scoped-recaptcha-bypass-token", "wrong_scoped_token")
         |> patch("/api/v2/tokens/#{token.contract_address.hash}/instances/#{token_id}/refetch-metadata", %{})
 
-      assert %{"message" => "Too Many Requests"} = json_response(request, 429)
+      assert %{"message" => "Too many requests. Increase limits now at https://dev.blockscout.com"} =
+               json_response(request, 429)
 
       :timer.sleep(100)
 
@@ -2228,7 +2248,8 @@ defmodule BlockScoutWeb.API.V2.TokenControllerTest do
         |> put_req_header("scoped-recaptcha-bypass-token", "some_token_that_does_not_exist")
         |> patch("/api/v2/tokens/#{token.contract_address.hash}/instances/#{token_id}/refetch-metadata", %{})
 
-      assert %{"message" => "Too Many Requests"} = json_response(request, 429)
+      assert %{"message" => "Too many requests. Increase limits now at https://dev.blockscout.com"} =
+               json_response(request, 429)
 
       request =
         Phoenix.ConnTest.build_conn()
@@ -2236,7 +2257,8 @@ defmodule BlockScoutWeb.API.V2.TokenControllerTest do
         |> put_req_header("scoped-recaptcha-bypass-token", "")
         |> patch("/api/v2/tokens/#{token.contract_address.hash}/instances/#{token_id}/refetch-metadata", %{})
 
-      assert %{"message" => "Too Many Requests"} = json_response(request, 429)
+      assert %{"message" => "Too many requests. Increase limits now at https://dev.blockscout.com"} =
+               json_response(request, 429)
 
       :timer.sleep(100)
 
