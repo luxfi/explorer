@@ -1,0 +1,100 @@
+# chains.example.yaml -- All Lux chains across all networks
+#
+# Copy to chains.yaml and adjust as needed:
+#   cp chains.example.yaml chains.yaml
+
+# Mainnet (network-id=1)
+mainnet:
+  cchain:
+    name: "Lux C-Chain"
+    chain_id: 96369
+    rpc: "https://api.lux.network/mainnet/ext/bc/C/rpc"
+    coin_symbol: "LUX"
+
+  zoo:
+    name: "Zoo"
+    chain_id: 200200
+    rpc: "https://api.lux.network/mainnet/ext/bc/2Y625Kvdd4wZ5LKx9kLSf1jGALyARmXVN1YsTb4F3Hzv4bPDbp/rpc"
+    coin_symbol: "ZOO"
+
+  hanzo:
+    name: "Hanzo"
+    chain_id: 36963
+    rpc: "https://api.lux.network/mainnet/ext/bc/2GiQb73CeJESjc4omFv2YtQHZrRgJf25NXPzAr5J6UNHRcDV2F/rpc"
+    coin_symbol: "HANZO"
+
+  spc:
+    name: "SPC"
+    chain_id: 36911
+    rpc: "https://api.lux.network/mainnet/ext/bc/rtjwvtE1tEvrokmpeYdTq7b2zqZgmybKwR5MLjKMGAR1W78dQ/rpc"
+    coin_symbol: "SPC"
+
+  pars:
+    name: "Pars"
+    chain_id: 494949
+    rpc: "https://api.lux.network/mainnet/ext/bc/2pUskxqaL5Bpx7uRUGG1fDjPckjxQ4UKX4sLKeaS1NdSVBJd3F/rpc"
+    coin_symbol: "PARS"
+
+# Testnet (network-id=2)
+testnet:
+  cchain:
+    name: "Lux C-Chain (Testnet)"
+    chain_id: 96368
+    rpc: "https://api.lux.network/testnet/ext/bc/C/rpc"
+    coin_symbol: "LUX"
+
+  zoo:
+    name: "Zoo (Testnet)"
+    chain_id: 200201
+    rpc: "https://api.lux.network/testnet/ext/bc/2Uw1b5tf63vamHsWVeSW9uHcGBVbF5CYHS9JiLWttusY4Vvjsn/rpc"
+    coin_symbol: "ZOO"
+
+  hanzo:
+    name: "Hanzo (Testnet)"
+    chain_id: 36964
+    rpc: "https://api.lux.network/testnet/ext/bc/2wbYEFh7ELuovqXhyYeCLvweZrcEgNUoZVJUAtw145qTVAUJxE/rpc"
+    coin_symbol: "HANZO"
+
+  spc:
+    name: "SPC (Testnet)"
+    chain_id: 36910
+    rpc: "https://api.lux.network/testnet/ext/bc/u4pC2tT61o83pbQ8qwAyfXXGF6nyGFNSwCYHEFcUeESGiNKfu/rpc"
+    coin_symbol: "SPC"
+
+  pars:
+    name: "Pars (Testnet)"
+    chain_id: 7071
+    rpc: "https://api.lux.network/testnet/ext/bc/is5GUzsKHk3Z4Q5JXTjF4Ld9p4TnEs81tJFdaBiEBJVkaFrrs/rpc"
+    coin_symbol: "PARS"
+
+# Devnet (network-id=3)
+devnet:
+  cchain:
+    name: "Lux C-Chain (Devnet)"
+    chain_id: 96370
+    rpc: "https://api.lux.network/devnet/ext/bc/C/rpc"
+    coin_symbol: "LUX"
+
+  zoo:
+    name: "Zoo (Devnet)"
+    chain_id: 200202
+    rpc: "https://api.lux.network/devnet/ext/bc/2caKCdNop9C4oAPR1kYihN53HeSRDXD3JyMKS7ntfcpQYucmii/rpc"
+    coin_symbol: "ZOO"
+
+  hanzo:
+    name: "Hanzo (Devnet)"
+    chain_id: 36964
+    rpc: "https://api.lux.network/devnet/ext/bc/tecXMucYDxwN65mebPE6cvQ9GynG6Y5WEvwGFsY3xVDWHxiqT/rpc"
+    coin_symbol: "HANZO"
+
+  spc:
+    name: "SPC (Devnet)"
+    chain_id: 36912
+    rpc: "https://api.lux.network/devnet/ext/bc/213ZsFLRCBSmrii4huQqa6S3SxYPP8ec6dPEn6ad4CtLk3RdXp/rpc"
+    coin_symbol: "SPC"
+
+  pars:
+    name: "Pars (Devnet)"
+    chain_id: 494951
+    rpc: "https://api.lux.network/devnet/ext/bc/MEGAgimfcodi7QaqCruFpTkNM6fqu7ZduLmWJJjGQwUg8uDPJ/rpc"
+    coin_symbol: "PARS"
