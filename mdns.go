@@ -72,39 +72,36 @@ func (r *ChainRegistry) probeNode(host string, port int, brand string) {
 	nodeID, _ := info["nodeID"].(string)
 	log.Printf("[mdns] %s node %s at %s", brand, nodeID, base)
 
-	// Get all blockchains registered on the platform.
-	chains, err := rpcCall(base+"/ext/bc/P", "platform.getBlockchains", nil)
+	// Use info.getChains — returns ONLY chains this node is actively tracking.
+	// One RPC call, no probing. Added in luxd v1.24.28+.
+	chains, err := rpcCall(base+"/ext/info", "info.getChains", nil)
 	if err != nil {
-		log.Printf("[mdns] %s: cannot query platform: %v", base, err)
+		// Fallback: older nodes without info.getChains — probe each chain
+		log.Printf("[mdns] %s: info.getChains not available, falling back to platform probe", base)
+		r.probeNodeLegacy(base, brand)
 		return
 	}
 
-	blockchains, ok := chains["blockchains"].([]any)
+	chainList, ok := chains["chains"].([]any)
 	if !ok {
-		log.Printf("[mdns] %s: no blockchains in response", base)
+		log.Printf("[mdns] %s: unexpected getChains response", base)
 		return
 	}
 
-	for _, bc := range blockchains {
-		bcMap, ok := bc.(map[string]any)
+	for _, c := range chainList {
+		cMap, ok := c.(map[string]any)
 		if !ok {
 			continue
 		}
-		name, _ := bcMap["name"].(string)
-		id, _ := bcMap["id"].(string)
-		vmID, _ := bcMap["vmID"].(string)
+		name, _ := cMap["name"].(string)
+		id, _ := cMap["id"].(string)
+		vmID, _ := cMap["vmID"].(string)
 
-		if name == "" || id == "" {
+		if id == "" {
 			continue
 		}
-
-		rpcURL := fmt.Sprintf("%s/ext/bc/%s/rpc", base, id)
-
-		// Probe the RPC endpoint — if this node doesn't track this chain,
-		// the endpoint returns an error. Only register chains that respond.
-		if !probeRPC(rpcURL) {
-			log.Printf("[mdns] %s/%s: not tracked by this node, skipping", brand, name)
-			continue
+		if name == "" {
+			name = id[:8]
 		}
 
 		slug := strings.ToLower(strings.ReplaceAll(name, " ", "-"))
@@ -118,12 +115,60 @@ func (r *ChainRegistry) probeNode(host string, port int, brand string) {
 		r.Add(ChainConfig{
 			Slug:    slug,
 			Name:    name,
-			RPC:     rpcURL,
+			RPC:     fmt.Sprintf("%s/ext/bc/%s/rpc", base, id),
 			Type:    chainType,
 			Source:  "mdns",
 			Default: isDefault,
 		})
-		log.Printf("[mdns] registered %s (%s) at %s", slug, chainType, rpcURL)
+		log.Printf("[mdns] %s: registered %s (%s)", brand, slug, chainType)
+	}
+}
+
+// probeNodeLegacy uses platform.getBlockchains + per-chain RPC probe for older nodes
+// that don't support info.getChains.
+func (r *ChainRegistry) probeNodeLegacy(base, brand string) {
+	chains, err := rpcCall(base+"/ext/bc/P", "platform.getBlockchains", nil)
+	if err != nil {
+		log.Printf("[mdns] %s: cannot query platform either, giving up", base)
+		return
+	}
+
+	blockchains, ok := chains["blockchains"].([]any)
+	if !ok {
+		return
+	}
+
+	for _, bc := range blockchains {
+		bcMap, ok := bc.(map[string]any)
+		if !ok {
+			continue
+		}
+		name, _ := bcMap["name"].(string)
+		id, _ := bcMap["id"].(string)
+		vmID, _ := bcMap["vmID"].(string)
+		if name == "" || id == "" {
+			continue
+		}
+
+		rpcURL := fmt.Sprintf("%s/ext/bc/%s/rpc", base, id)
+		if !probeRPC(rpcURL) {
+			continue
+		}
+
+		slug := strings.ToLower(strings.ReplaceAll(name, " ", "-"))
+		if brand != "lux" {
+			slug = brand + "-" + slug
+		}
+
+		r.Add(ChainConfig{
+			Slug:    slug,
+			Name:    name,
+			RPC:     rpcURL,
+			Type:    inferChainType(vmID, name),
+			Source:  "mdns",
+			Default: !r.HasDefault(),
+		})
+		log.Printf("[mdns] %s: registered %s (legacy probe)", brand, slug)
 	}
 }
 
