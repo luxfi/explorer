@@ -72,14 +72,10 @@ func (r *ChainRegistry) probeNode(host string, port int, brand string) {
 	nodeID, _ := info["nodeID"].(string)
 	log.Printf("[mdns] %s node %s at %s", brand, nodeID, base)
 
-	// Query blockchains dynamically — never hardcode chain lists.
-	chains, err := rpcCall(base+"/ext/info", "info.getBlockchains", nil)
+	// Get all blockchains registered on the platform.
+	chains, err := rpcCall(base+"/ext/bc/P", "platform.getBlockchains", nil)
 	if err != nil {
-		// Try platform API
-		chains, err = rpcCall(base+"/ext/bc/P", "platform.getBlockchains", nil)
-	}
-	if err != nil {
-		log.Printf("[mdns] %s: cannot query chains, skipping", base)
+		log.Printf("[mdns] %s: cannot query platform: %v", base, err)
 		return
 	}
 
@@ -102,25 +98,49 @@ func (r *ChainRegistry) probeNode(host string, port int, brand string) {
 			continue
 		}
 
+		rpcURL := fmt.Sprintf("%s/ext/bc/%s/rpc", base, id)
+
+		// Probe the RPC endpoint — if this node doesn't track this chain,
+		// the endpoint returns an error. Only register chains that respond.
+		if !probeRPC(rpcURL) {
+			log.Printf("[mdns] %s/%s: not tracked by this node, skipping", brand, name)
+			continue
+		}
+
 		slug := strings.ToLower(strings.ReplaceAll(name, " ", "-"))
 		if brand != "lux" {
 			slug = brand + "-" + slug
 		}
 
 		chainType := inferChainType(vmID, name)
-
-		// First discovered chain for this brand becomes default
 		isDefault := !r.HasDefault()
 
 		r.Add(ChainConfig{
 			Slug:    slug,
 			Name:    name,
-			RPC:     fmt.Sprintf("%s/ext/bc/%s/rpc", base, id),
+			RPC:     rpcURL,
 			Type:    chainType,
 			Source:  "mdns",
 			Default: isDefault,
 		})
+		log.Printf("[mdns] registered %s (%s) at %s", slug, chainType, rpcURL)
 	}
+}
+
+// probeRPC checks if a chain's RPC endpoint is actually available on this node.
+// Returns true if the endpoint responds (even with an error result — that means the
+// chain is tracked). Returns false if connection refused or timeout (not tracked).
+func probeRPC(rpcURL string) bool {
+	client := &http.Client{Timeout: 2 * time.Second}
+	body := `{"jsonrpc":"2.0","id":1,"method":"eth_chainId","params":[]}`
+	resp, err := client.Post(rpcURL, "application/json", strings.NewReader(body))
+	if err != nil {
+		return false
+	}
+	resp.Body.Close()
+	// Any HTTP response means the chain is tracked — even 400/500 means the
+	// endpoint exists. Only connection failure means not tracked.
+	return true
 }
 
 // inferChainType determines chain type from the VM ID and chain name reported by the node.
