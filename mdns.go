@@ -120,19 +120,56 @@ func (r *ChainRegistry) probeNode(host string, port int, brand string) {
 	}
 }
 
-// registerStandardChains adds C/P/X chains from a node when blockchain query fails.
+// knownChains maps daemon brands to their standard chain sets.
+// Each daemon has different chains — not all have C/P/X.
+var knownChains = map[string][]ChainConfig{
+	"lux": {
+		{Slug: "cchain", Name: "Lux C-Chain", Type: "evm", Default: true},
+		{Slug: "pchain", Name: "Lux P-Chain", Type: "pchain"},
+		{Slug: "xchain", Name: "Lux X-Chain", Type: "dag"},
+	},
+	"zoo": {
+		{Slug: "zoo-evm", Name: "Zoo EVM", Type: "evm", Default: true},
+		{Slug: "zoo-dex", Name: "Zoo DEX", Type: "evm"},
+	},
+	"liquid": {
+		{Slug: "liquid-evm", Name: "Liquid EVM", Type: "evm", Default: true},
+		{Slug: "liquid-dex", Name: "Liquid DEX", Type: "evm"},
+		{Slug: "liquid-fhe", Name: "Liquid FHE", Type: "evm"},
+	},
+	"hanzo": {
+		{Slug: "hanzo-evm", Name: "Hanzo EVM", Type: "evm", Default: true},
+	},
+	"pars": {
+		{Slug: "pars-evm", Name: "Pars EVM", Type: "evm", Default: true},
+	},
+}
+
+// registerStandardChains adds known chains for a daemon when blockchain query fails.
 func (r *ChainRegistry) registerStandardChains(base, brand string) {
-	prefix := ""
-	if brand != "lux" {
-		prefix = brand + "-"
+	chains, ok := knownChains[brand]
+	if !ok {
+		log.Printf("[mdns] no known chains for %s, skipping fallback", brand)
+		return
 	}
 
-	standards := []ChainConfig{
-		{Slug: prefix + "cchain", Name: brand + " C-Chain", RPC: base + "/ext/bc/C/rpc", Type: "evm", Source: "mdns", Default: brand == "lux"},
-		{Slug: prefix + "pchain", Name: brand + " P-Chain", RPC: base + "/ext/bc/P", Type: "pchain", Source: "mdns"},
-		{Slug: prefix + "xchain", Name: brand + " X-Chain", RPC: base + "/ext/bc/X", Type: "dag", Source: "mdns"},
-	}
-	for _, c := range standards {
+	for _, c := range chains {
+		c.Source = "mdns"
+		// Map slug to RPC path
+		switch {
+		case strings.HasSuffix(c.Slug, "-evm") || c.Slug == "cchain":
+			c.RPC = base + "/ext/bc/C/rpc"
+		case strings.HasSuffix(c.Slug, "-dex"):
+			c.RPC = base + "/ext/bc/D/rpc"
+		case strings.HasSuffix(c.Slug, "-fhe"):
+			c.RPC = base + "/ext/bc/T/rpc"
+		case c.Slug == "pchain":
+			c.RPC = base + "/ext/bc/P"
+		case c.Slug == "xchain":
+			c.RPC = base + "/ext/bc/X"
+		default:
+			c.RPC = base + "/ext/bc/C/rpc"
+		}
 		if err := r.Add(c); err != nil {
 			log.Printf("[mdns] skip %s: %v", c.Slug, err)
 		}
