@@ -72,16 +72,20 @@ func (r *ChainRegistry) probeNode(host string, port int, brand string) {
 	nodeID, _ := info["nodeID"].(string)
 	log.Printf("[mdns] %s node %s at %s", brand, nodeID, base)
 
-	// Query blockchains
-	chains, err := rpcCall(base+"/ext/bc", "platform.getBlockchains", nil)
+	// Query blockchains dynamically — never hardcode chain lists.
+	chains, err := rpcCall(base+"/ext/info", "info.getBlockchains", nil)
 	if err != nil {
-		r.registerStandardChains(base, brand)
+		// Try platform API
+		chains, err = rpcCall(base+"/ext/bc/P", "platform.getBlockchains", nil)
+	}
+	if err != nil {
+		log.Printf("[mdns] %s: cannot query chains, skipping", base)
 		return
 	}
 
 	blockchains, ok := chains["blockchains"].([]any)
 	if !ok {
-		r.registerStandardChains(base, brand)
+		log.Printf("[mdns] %s: no blockchains in response", base)
 		return
 	}
 
@@ -103,77 +107,46 @@ func (r *ChainRegistry) probeNode(host string, port int, brand string) {
 			slug = brand + "-" + slug
 		}
 
-		chainType := "evm"
-		if strings.Contains(vmID, "avm") {
-			chainType = "dag"
-		} else if strings.Contains(vmID, "platform") {
-			chainType = "pchain"
-		}
+		chainType := inferChainType(vmID, name)
+
+		// First discovered chain for this brand becomes default
+		isDefault := !r.HasDefault()
 
 		r.Add(ChainConfig{
-			Slug:   slug,
-			Name:   name,
-			RPC:    fmt.Sprintf("%s/ext/bc/%s/rpc", base, id),
-			Type:   chainType,
-			Source: "mdns",
+			Slug:    slug,
+			Name:    name,
+			RPC:     fmt.Sprintf("%s/ext/bc/%s/rpc", base, id),
+			Type:    chainType,
+			Source:  "mdns",
+			Default: isDefault,
 		})
 	}
 }
 
-// knownChains maps daemon brands to their standard chain sets.
-// Each daemon has different chains — not all have C/P/X.
-var knownChains = map[string][]ChainConfig{
-	"lux": {
-		{Slug: "cchain", Name: "Lux C-Chain", Type: "evm", Default: true},
-		{Slug: "pchain", Name: "Lux P-Chain", Type: "pchain"},
-		{Slug: "xchain", Name: "Lux X-Chain", Type: "dag"},
-	},
-	"zoo": {
-		{Slug: "zoo-evm", Name: "Zoo EVM", Type: "evm", Default: true},
-		{Slug: "zoo-dex", Name: "Zoo DEX", Type: "evm"},
-	},
-	"liquid": {
-		{Slug: "liquid-evm", Name: "Liquid EVM", Type: "evm", Default: true},
-		{Slug: "liquid-dex", Name: "Liquid DEX", Type: "evm"},
-		{Slug: "liquid-fhe", Name: "Liquid FHE", Type: "evm"},
-	},
-	"hanzo": {
-		{Slug: "hanzo-evm", Name: "Hanzo EVM", Type: "evm", Default: true},
-	},
-	"pars": {
-		{Slug: "pars-evm", Name: "Pars EVM", Type: "evm", Default: true},
-	},
+// inferChainType determines chain type from the VM ID and chain name reported by the node.
+// No hardcoded chain lists — this only classifies what the node already told us.
+func inferChainType(vmID, name string) string {
+	lower := strings.ToLower(vmID + " " + name)
+	switch {
+	case strings.Contains(lower, "platform"):
+		return "pchain"
+	case strings.Contains(lower, "avm") || strings.Contains(lower, "x-chain"):
+		return "dag"
+	default:
+		return "evm"
+	}
 }
 
-// registerStandardChains adds known chains for a daemon when blockchain query fails.
-func (r *ChainRegistry) registerStandardChains(base, brand string) {
-	chains, ok := knownChains[brand]
-	if !ok {
-		log.Printf("[mdns] no known chains for %s, skipping fallback", brand)
-		return
-	}
-
-	for _, c := range chains {
-		c.Source = "mdns"
-		// Map slug to RPC path
-		switch {
-		case strings.HasSuffix(c.Slug, "-evm") || c.Slug == "cchain":
-			c.RPC = base + "/ext/bc/C/rpc"
-		case strings.HasSuffix(c.Slug, "-dex"):
-			c.RPC = base + "/ext/bc/D/rpc"
-		case strings.HasSuffix(c.Slug, "-fhe"):
-			c.RPC = base + "/ext/bc/T/rpc"
-		case c.Slug == "pchain":
-			c.RPC = base + "/ext/bc/P"
-		case c.Slug == "xchain":
-			c.RPC = base + "/ext/bc/X"
-		default:
-			c.RPC = base + "/ext/bc/C/rpc"
-		}
-		if err := r.Add(c); err != nil {
-			log.Printf("[mdns] skip %s: %v", c.Slug, err)
+// HasDefault returns true if any chain is marked as default.
+func (r *ChainRegistry) HasDefault() bool {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	for _, e := range r.chains {
+		if e.Config.Default {
+			return true
 		}
 	}
+	return false
 }
 
 // rpcCall makes a JSON-RPC call and returns the result map.
