@@ -11,35 +11,55 @@ import (
 	"github.com/luxfi/mdns"
 )
 
-// StartMDNSDiscovery browses for _luxd._tcp services and auto-registers
+// daemonService maps mDNS service types to their daemon info.
+var daemonServices = []struct {
+	Service string // mDNS service type
+	Name    string // daemon name for logs
+	Brand   string // brand prefix for chain slugs
+}{
+	{"_luxd._tcp", "luxd", "lux"},
+	{"_zood._tcp", "zood", "zoo"},
+	{"_lqd._tcp", "lqd", "liquid"},
+	{"_hanzod._tcp", "hanzod", "hanzo"},
+	{"_parsd._tcp", "parsd", "pars"},
+}
+
+// StartMDNSDiscovery browses for all known daemon types and auto-registers
 // discovered chains. Blocks until the registry's hub context is cancelled.
 func (r *ChainRegistry) StartMDNSDiscovery() {
-	disc := mdns.New("_luxd._tcp", "explorer", 0,
-		mdns.WithBrowseInterval(10*time.Second),
-		mdns.WithStaleTimeout(60*time.Second),
-	)
+	var discs []*mdns.Discovery
 
-	disc.OnPeer(func(peer *mdns.Peer, joined bool) {
-		if !joined {
-			return
+	for _, svc := range daemonServices {
+		svc := svc // capture
+		disc := mdns.New(svc.Service, "explorer", 0,
+			mdns.WithBrowseInterval(10*time.Second),
+			mdns.WithStaleTimeout(60*time.Second),
+		)
+
+		disc.OnPeer(func(peer *mdns.Peer, joined bool) {
+			if !joined {
+				return
+			}
+			log.Printf("[mdns] discovered %s at %s:%d", svc.Name, peer.Addr, peer.Port)
+			r.probeNode(peer.Addr, peer.Port, svc.Brand)
+		})
+
+		if err := disc.Start(); err != nil {
+			log.Printf("[mdns] %s: failed to start: %v", svc.Service, err)
+			continue
 		}
-		log.Printf("[mdns] discovered luxd at %s:%d", peer.Addr, peer.Port)
-		r.probeNode(peer.Addr, peer.Port)
-	})
-
-	if err := disc.Start(); err != nil {
-		log.Printf("[mdns] failed to start: %v", err)
-		return
+		discs = append(discs, disc)
 	}
-	defer disc.Stop()
+
+	log.Printf("[mdns] browsing for %d daemon types", len(discs))
 
 	// Block forever - caller runs this in a goroutine
 	select {}
 }
 
-// probeNode queries a luxd node's info and blockchain endpoints,
-// then registers any discovered chains.
-func (r *ChainRegistry) probeNode(host string, port int) {
+// probeNode queries a node's info and blockchain endpoints,
+// then registers any discovered chains. Brand prefixes slugs for non-lux daemons.
+func (r *ChainRegistry) probeNode(host string, port int, brand string) {
 	base := fmt.Sprintf("http://%s:%d", host, port)
 
 	// Query node info
@@ -50,19 +70,18 @@ func (r *ChainRegistry) probeNode(host string, port int) {
 	}
 
 	nodeID, _ := info["nodeID"].(string)
-	log.Printf("[mdns] node %s at %s", nodeID, base)
+	log.Printf("[mdns] %s node %s at %s", brand, nodeID, base)
 
 	// Query blockchains
 	chains, err := rpcCall(base+"/ext/bc", "platform.getBlockchains", nil)
 	if err != nil {
-		// Fallback: try standard chains
-		r.registerStandardChains(base)
+		r.registerStandardChains(base, brand)
 		return
 	}
 
 	blockchains, ok := chains["blockchains"].([]any)
 	if !ok {
-		r.registerStandardChains(base)
+		r.registerStandardChains(base, brand)
 		return
 	}
 
@@ -80,6 +99,10 @@ func (r *ChainRegistry) probeNode(host string, port int) {
 		}
 
 		slug := strings.ToLower(strings.ReplaceAll(name, " ", "-"))
+		if brand != "lux" {
+			slug = brand + "-" + slug
+		}
+
 		chainType := "evm"
 		if strings.Contains(vmID, "avm") {
 			chainType = "dag"
@@ -97,12 +120,17 @@ func (r *ChainRegistry) probeNode(host string, port int) {
 	}
 }
 
-// registerStandardChains adds C/P/X chains from a standard luxd node.
-func (r *ChainRegistry) registerStandardChains(base string) {
+// registerStandardChains adds C/P/X chains from a node when blockchain query fails.
+func (r *ChainRegistry) registerStandardChains(base, brand string) {
+	prefix := ""
+	if brand != "lux" {
+		prefix = brand + "-"
+	}
+
 	standards := []ChainConfig{
-		{Slug: "cchain", Name: "C-Chain", RPC: base + "/ext/bc/C/rpc", Type: "evm", Source: "mdns", Default: true},
-		{Slug: "pchain", Name: "P-Chain", RPC: base + "/ext/bc/P", Type: "pchain", Source: "mdns"},
-		{Slug: "xchain", Name: "X-Chain", RPC: base + "/ext/bc/X", Type: "dag", Source: "mdns"},
+		{Slug: prefix + "cchain", Name: brand + " C-Chain", RPC: base + "/ext/bc/C/rpc", Type: "evm", Source: "mdns", Default: brand == "lux"},
+		{Slug: prefix + "pchain", Name: brand + " P-Chain", RPC: base + "/ext/bc/P", Type: "pchain", Source: "mdns"},
+		{Slug: prefix + "xchain", Name: brand + " X-Chain", RPC: base + "/ext/bc/X", Type: "dag", Source: "mdns"},
 	}
 	for _, c := range standards {
 		if err := r.Add(c); err != nil {
