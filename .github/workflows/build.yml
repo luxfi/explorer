@@ -17,9 +17,9 @@ jobs:
     strategy:
       matrix:
         include:
-          - runner: [self-hosted, linux, amd64]
+          - runner: lux-build-amd64
             platform: linux/amd64
-          - runner: [self-hosted, linux, arm64]
+          - runner: lux-build-arm64
             platform: linux/arm64
     runs-on: ${{ matrix.runner }}
     permissions:
@@ -54,7 +54,7 @@ jobs:
 
   manifest:
     needs: build
-    runs-on: [self-hosted, linux, amd64]
+    runs-on: lux-build-amd64
     permissions:
       packages: write
     steps:
