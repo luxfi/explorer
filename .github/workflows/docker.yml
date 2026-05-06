@@ -7,17 +7,43 @@ on:
 permissions:
   contents: read
   packages: write
+  id-token: write
 
-# Multi-arch (amd64 + arm64) on native hanzo ARC runners.
-# No QEMU emulation. No GitHub-hosted fallback.
-# Semver-only tags (v*); see hanzoai/.github docker-build.yml.
+# Multi-arch on luxfi org's native ARC runner pool. arm64 via QEMU until a
+# native arm64 runner joins the pool. Semver tags only.
 jobs:
   docker:
-    uses: hanzoai/.github/.github/workflows/docker-build.yml@main
-    with:
-      image: ghcr.io/luxfi/explorer
-      platforms: linux/amd64,linux/arm64
-      runner-amd64: hanzo-build-linux-amd64
-      runner-arm64: hanzo-build-linux-arm64
-      runner-deploy: hanzo-deploy-linux-amd64
-    secrets: inherit
+    runs-on: lux-build-linux-amd64
+    steps:
+      - uses: actions/checkout@v4
+      - uses: docker/setup-qemu-action@v3
+        with:
+          platforms: linux/arm64
+      - uses: docker/setup-buildx-action@v3
+        with:
+          driver: docker-container
+          driver-opts: network=host
+      - uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.repository_owner }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ghcr.io/luxfi/explorer
+          flavor: latest=auto
+          tags: |
+            type=semver,pattern={{version}}
+            type=semver,pattern={{major}}.{{minor}}
+            type=sha,prefix=sha-
+      - uses: docker/build-push-action@v6
+        with:
+          context: .
+          platforms: linux/amd64,linux/arm64
+          labels: ${{ steps.meta.outputs.labels }}
+          tags: ${{ steps.meta.outputs.tags }}
+          cache-from: type=gha,scope=explorer
+          cache-to: type=gha,scope=explorer,mode=max
+          provenance: false
+          push: true
