@@ -9,14 +9,17 @@ permissions:
   packages: write
   id-token: write
 
-# amd64-only on luxfi org's native ARC runner pool. arm64 will be added back
-# once a native arm64 scale-set is provisioned (CLAUDE.md: no QEMU).
-# Semver tags only.
+# Multi-arch on luxfi org's native amd64 ARC runner pool; arm64 via QEMU
+# (matches lux/graph + lux/indexer docker.yml). Mac devs run native arm64
+# under OrbStack — zero Rosetta is allowed. Semver tags only.
 jobs:
   docker:
     runs-on: lux-build-linux-amd64
     steps:
       - uses: actions/checkout@v4
+      - uses: docker/setup-qemu-action@v3
+        with:
+          platforms: linux/arm64
       - uses: docker/setup-buildx-action@v3
         with:
           driver: docker-container
@@ -38,7 +41,7 @@ jobs:
       - uses: docker/build-push-action@v6
         with:
           context: .
-          platforms: linux/amd64
+          platforms: linux/amd64,linux/arm64
           labels: ${{ steps.meta.outputs.labels }}
           tags: ${{ steps.meta.outputs.tags }}
           cache-from: type=gha,scope=explorer
