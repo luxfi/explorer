@@ -6,25 +6,14 @@ import (
 	"log"
 	"net/http"
 	"os"
-	"regexp"
 	"strings"
 	"sync"
 
 	"gopkg.in/yaml.v3"
 )
 
-// ChainConfig defines a single chain to index.
-type ChainConfig struct {
-	Slug    string `json:"slug" yaml:"slug"`
-	Name    string `json:"name" yaml:"name"`
-	ChainID int64  `json:"chain_id" yaml:"chain_id"`
-	RPC     string `json:"rpc" yaml:"rpc"`
-	Type    string `json:"type" yaml:"type"` // evm, dag, pchain, xchain
-	Default bool   `json:"default" yaml:"default"`
-	Source  string `json:"source" yaml:"-"` // config, env, mdns, admin
-}
-
-// ChainsFile is the top-level YAML structure for chains.yaml.
+// ChainsFile is the legacy `chains: [...]` YAML shape used by tests and the
+// minimal config. The full Config struct in config.go is the canonical schema.
 type ChainsFile struct {
 	Chains []ChainConfig `yaml:"chains"`
 }
@@ -34,14 +23,12 @@ type ChainEntry struct {
 	Config ChainConfig
 }
 
-// slugPattern restricts slugs to lowercase alphanumeric + hyphen.
-var slugPattern = regexp.MustCompile(`^[a-z0-9][a-z0-9-]{0,63}$`)
-
 // ChainRegistry is a thread-safe, runtime-mutable chain store.
 type ChainRegistry struct {
 	mu     sync.RWMutex
-	chains map[string]*ChainEntry // slug -> entry
+	chains map[string]*ChainEntry
 	hub    *RealtimeHub
+	sup    *ChainSupervisor // nil = registry-only mode (tests)
 }
 
 // NewChainRegistry creates an empty registry.
@@ -52,7 +39,12 @@ func NewChainRegistry() *ChainRegistry {
 	}
 }
 
-// Add registers a chain. Returns error if slug is invalid or already exists from a higher-priority source.
+// AttachSupervisor wires a ChainSupervisor so admin/config/mdns adds also
+// spawn per-chain indexer + graph goroutines, and removes cancel them.
+func (r *ChainRegistry) AttachSupervisor(s *ChainSupervisor) { r.sup = s }
+
+// Add registers a chain. mDNS-sourced chains never override higher-priority
+// (config/env/admin) entries; admin/config/env duplicates return an error.
 func (r *ChainRegistry) Add(cfg ChainConfig) error {
 	if !slugPattern.MatchString(cfg.Slug) {
 		return fmt.Errorf("invalid slug %q", cfg.Slug)
@@ -65,50 +57,54 @@ func (r *ChainRegistry) Add(cfg ChainConfig) error {
 	}
 
 	r.mu.Lock()
-	defer r.mu.Unlock()
-
 	if existing, ok := r.chains[cfg.Slug]; ok {
-		// mDNS never overrides manual config
 		if cfg.Source == "mdns" && existing.Config.Source != "mdns" {
+			r.mu.Unlock()
 			return fmt.Errorf("chain %q already configured via %s", cfg.Slug, existing.Config.Source)
 		}
-		// All other sources: reject duplicate (use Update to modify)
 		if cfg.Source != "mdns" {
+			r.mu.Unlock()
 			return fmt.Errorf("chain %q already exists", cfg.Slug)
 		}
-		// mDNS re-discovery: update last-seen silently
 		existing.Config.RPC = cfg.RPC
+		r.mu.Unlock()
 		return nil
 	}
-
 	r.chains[cfg.Slug] = &ChainEntry{Config: cfg}
+	r.mu.Unlock()
 	log.Printf("[registry] added chain %s (%s) source=%s", cfg.Slug, cfg.RPC, cfg.Source)
+
+	if r.sup != nil {
+		r.sup.start(cfg)
+	}
 	return nil
 }
 
 // Remove deletes a chain by slug.
 func (r *ChainRegistry) Remove(slug string) bool {
 	r.mu.Lock()
-	defer r.mu.Unlock()
-
 	if _, ok := r.chains[slug]; !ok {
+		r.mu.Unlock()
 		return false
 	}
 	delete(r.chains, slug)
+	r.mu.Unlock()
 	log.Printf("[registry] removed chain %s", slug)
+
+	if r.sup != nil {
+		r.sup.stop(slug)
+	}
 	return true
 }
 
 // Update modifies an existing chain's config.
 func (r *ChainRegistry) Update(slug string, cfg ChainConfig) error {
 	r.mu.Lock()
-	defer r.mu.Unlock()
-
 	entry, ok := r.chains[slug]
 	if !ok {
+		r.mu.Unlock()
 		return fmt.Errorf("chain %q not found", slug)
 	}
-
 	if cfg.Name != "" {
 		entry.Config.Name = cfg.Name
 	}
@@ -123,8 +119,15 @@ func (r *ChainRegistry) Update(slug string, cfg ChainConfig) error {
 	}
 	entry.Config.Default = cfg.Default
 	entry.Config.Source = "admin"
+	updated := entry.Config
+	r.mu.Unlock()
 
 	log.Printf("[registry] updated chain %s", slug)
+
+	if r.sup != nil {
+		r.sup.stop(slug)
+		r.sup.start(updated)
+	}
 	return nil
 }
 
@@ -132,7 +135,6 @@ func (r *ChainRegistry) Update(slug string, cfg ChainConfig) error {
 func (r *ChainRegistry) Get(slug string) (ChainConfig, bool) {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
-
 	entry, ok := r.chains[slug]
 	if !ok {
 		return ChainConfig{}, false
@@ -144,7 +146,6 @@ func (r *ChainRegistry) Get(slug string) (ChainConfig, bool) {
 func (r *ChainRegistry) List() []ChainConfig {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
-
 	out := make([]ChainConfig, 0, len(r.chains))
 	for _, e := range r.chains {
 		out = append(out, e.Config)
@@ -159,21 +160,21 @@ func (r *ChainRegistry) Count() int {
 	return len(r.chains)
 }
 
-// LoadFromFile loads chains from a YAML file.
+// LoadFromFile loads chains from a YAML file using the legacy `chains: [...]`
+// shape. Full Config (with brand, networks, etc.) loads via LoadConfig.
 func (r *ChainRegistry) LoadFromFile(path string) error {
 	data, err := os.ReadFile(path)
 	if err != nil {
 		return fmt.Errorf("read %s: %w", path, err)
 	}
-
 	var f ChainsFile
 	if err := yaml.Unmarshal(data, &f); err != nil {
 		return fmt.Errorf("parse %s: %w", path, err)
 	}
-
 	for _, c := range f.Chains {
 		c.Source = "config"
 		c.RPC = os.Expand(c.RPC, os.Getenv)
+		c.WS = os.Expand(c.WS, os.Getenv)
 		if err := r.Add(c); err != nil {
 			log.Printf("[registry] skip %s from config: %v", c.Slug, err)
 		}
@@ -207,8 +208,6 @@ func (r *ChainRegistry) LoadFromEnv(val string) {
 	}
 }
 
-// --- HTTP Handlers ---
-
 // HandleList returns all chains as JSON.
 func (r *ChainRegistry) HandleList(w http.ResponseWriter, req *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
@@ -218,7 +217,7 @@ func (r *ChainRegistry) HandleList(w http.ResponseWriter, req *http.Request) {
 	})
 }
 
-// HandleAdd creates a new chain from JSON body.
+// HandleAdd creates a new chain from a JSON body.
 func (r *ChainRegistry) HandleAdd(w http.ResponseWriter, req *http.Request) {
 	var cfg ChainConfig
 	if err := json.NewDecoder(http.MaxBytesReader(w, req.Body, 4096)).Decode(&cfg); err != nil {
@@ -226,14 +225,12 @@ func (r *ChainRegistry) HandleAdd(w http.ResponseWriter, req *http.Request) {
 		return
 	}
 	cfg.Source = "admin"
-
 	if err := r.Add(cfg); err != nil {
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusConflict)
 		json.NewEncoder(w).Encode(map[string]string{"error": err.Error()})
 		return
 	}
-
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusCreated)
 	json.NewEncoder(w).Encode(cfg)
@@ -246,20 +243,17 @@ func (r *ChainRegistry) HandleUpdate(w http.ResponseWriter, req *http.Request) {
 		http.Error(w, `{"error":"slug required"}`, http.StatusBadRequest)
 		return
 	}
-
 	var cfg ChainConfig
 	if err := json.NewDecoder(http.MaxBytesReader(w, req.Body, 4096)).Decode(&cfg); err != nil {
 		http.Error(w, `{"error":"invalid json"}`, http.StatusBadRequest)
 		return
 	}
-
 	if err := r.Update(slug, cfg); err != nil {
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusNotFound)
 		json.NewEncoder(w).Encode(map[string]string{"error": err.Error()})
 		return
 	}
-
 	updated, _ := r.Get(slug)
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(updated)
@@ -272,14 +266,12 @@ func (r *ChainRegistry) HandleRemove(w http.ResponseWriter, req *http.Request) {
 		http.Error(w, `{"error":"slug required"}`, http.StatusBadRequest)
 		return
 	}
-
 	if !r.Remove(slug) {
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusNotFound)
 		json.NewEncoder(w).Encode(map[string]string{"error": "not found"})
 		return
 	}
-
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(map[string]string{"status": "removed", "slug": slug})
 }
