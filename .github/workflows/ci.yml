@@ -21,8 +21,10 @@ jobs:
       with: { repository: luxfi/indexer, ref: main, path: indexer }
     - uses: actions/checkout@v4
       with: { repository: luxfi/graph, ref: main, path: graph }
-    - name: Install build deps
-      run: sudo apt-get update -qq && sudo apt-get install -y --no-install-recommends gcc libsqlite3-dev
+    - name: Verify build deps
+      run: |
+        command -v gcc || { echo "gcc not installed on runner"; exit 1; }
+        gcc --version | head -1
     - uses: actions/setup-go@v5
       with: { go-version-file: explorer/go.mod }
     - name: Refresh go.sum (proxy cache inconsistency)
@@ -32,9 +34,12 @@ jobs:
         GOSUMDB: "off"
     - name: Build
       working-directory: explorer
+      env:
+        GOSUMDB: "off"
       run: go build ./...
     - name: Test
       working-directory: explorer
       env:
         CGO_ENABLED: "1"
+        GOSUMDB: "off"
       run: go test -race -count=1 ./...

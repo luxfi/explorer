@@ -46,7 +46,7 @@ COPY --from=frontend /app/out ./static
 # proxy state we actually see at build time and skip sum.golang.org.
 RUN rm -f go.sum && GOSUMDB=off go mod download
 
-RUN CGO_ENABLED=1 CGO_CFLAGS="-D_LARGEFILE64_SOURCE" \
+RUN CGO_ENABLED=1 CGO_CFLAGS="-D_LARGEFILE64_SOURCE" GOSUMDB=off \
     go build -trimpath \
       -ldflags="-s -w -X main.version=${VERSION}" \
       -o /out/explorer .
