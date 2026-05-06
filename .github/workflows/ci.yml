@@ -13,7 +13,7 @@ permissions:
 # network hop to a tagged version.
 jobs:
   test:
-    runs-on: hanzo-build-linux-amd64
+    runs-on: lux-build-linux-amd64
     steps:
     - uses: actions/checkout@v4
       with: { path: explorer }
@@ -25,9 +25,9 @@ jobs:
       with: { go-version-file: explorer/go.mod }
     - name: Build
       working-directory: explorer
-      run: |
-        go build ./...
+      run: go build ./...
     - name: Test
       working-directory: explorer
-      run: |
-        go test -race -count=1 ./...
+      env:
+        CGO_ENABLED: "1"
+      run: go test -race -count=1 ./...
