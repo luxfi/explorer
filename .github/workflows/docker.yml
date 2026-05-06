@@ -9,16 +9,14 @@ permissions:
   packages: write
   id-token: write
 
-# Multi-arch on luxfi org's native ARC runner pool. arm64 via QEMU until a
-# native arm64 runner joins the pool. Semver tags only.
+# amd64-only on luxfi org's native ARC runner pool. arm64 will be added back
+# once a native arm64 scale-set is provisioned (CLAUDE.md: no QEMU).
+# Semver tags only.
 jobs:
   docker:
     runs-on: lux-build-linux-amd64
     steps:
       - uses: actions/checkout@v4
-      - uses: docker/setup-qemu-action@v3
-        with:
-          platforms: linux/arm64
       - uses: docker/setup-buildx-action@v3
         with:
           driver: docker-container
@@ -40,7 +38,7 @@ jobs:
       - uses: docker/build-push-action@v6
         with:
           context: .
-          platforms: linux/amd64,linux/arm64
+          platforms: linux/amd64
           labels: ${{ steps.meta.outputs.labels }}
           tags: ${{ steps.meta.outputs.tags }}
           cache-from: type=gha,scope=explorer
