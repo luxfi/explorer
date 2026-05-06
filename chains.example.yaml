@@ -1,5 +1,10 @@
 # chains.example.yaml — full per-network customization for the unified Lux
 # explorer. Mount as /etc/explorer/chains.yaml or pass --config=chains.yaml.
+#
+# Every chain gets its own SQLite file under {data_dir}/{slug}/ and its own
+# /v1/indexer/{slug}/* + /v1/graph/{slug}/{subgraph}/* routes. Branding is
+# per-chain; the SPA reads it at runtime via /envs.js so a deploy can
+# rebrand by remounting this file + assets — no image rebuild.
 
 data_dir: /data
 http_addr: :8090
@@ -26,42 +31,90 @@ networks:
     chain_id: 96370
 
 chains:
+  # ── Lux native chains ─────────────────────────────────────────
+
   - slug: cchain
     name: Lux C-Chain
     chain_id: 96369
     type: evm
-    rpc: ${LUX_CCHAIN_RPC:-https://api.lux.network/mainnet/ext/bc/C/rpc}
+    rpc: ${LUX_CCHAIN_RPC:-https://api.lux.network/ext/bc/C/rpc}
     coin: LUX
     enabled: true
     default: true
-
-    indexer:
-      poll_interval: 30s
-      start_block: 0
-
+    indexer: { poll_interval: 30s }
     graph:
       enabled: true
       subgraphs:
         - { name: amm,        schema: amm,        enabled: true }
         - { name: securities, schema: securities, enabled: false }
-
     brand:
       name: Lux C-Chain
       coin: LUX
       accent_color: "#5cf"
-      icon_url: /icon.svg
-      logo_url: /logo.svg
 
-    tokens:
-      featured: []
-      allow_list: []
-      block_list: []
+  - slug: pchain
+    name: P-Chain
+    type: linear
+    rpc: ${LUX_RPC:-https://api.lux.network}/ext/bc/P
+    coin: LUX
+    enabled: true
+
+  - slug: xchain
+    name: X-Chain
+    type: dag
+    rpc: ${LUX_RPC:-https://api.lux.network}/ext/bc/X
+    coin: LUX
+    enabled: true
+
+  - slug: achain
+    name: A-Chain
+    type: dag
+    rpc: ${LUX_RPC:-https://api.lux.network}/ext/bc/A
+    coin: LUX
+    enabled: true
+
+  - slug: bchain
+    name: B-Chain
+    type: dag
+    rpc: ${LUX_RPC:-https://api.lux.network}/ext/bc/B
+    coin: LUX
+    enabled: true
+
+  - slug: qchain
+    name: Q-Chain
+    type: dag
+    rpc: ${LUX_RPC:-https://api.lux.network}/ext/bc/Q
+    coin: LUX
+    enabled: true
+
+  - slug: tchain
+    name: T-Chain
+    type: dag
+    rpc: ${LUX_RPC:-https://api.lux.network}/ext/bc/T
+    coin: LUX
+    enabled: true
+
+  - slug: zchain
+    name: Z-Chain
+    type: dag
+    rpc: ${LUX_RPC:-https://api.lux.network}/ext/bc/Z
+    coin: LUX
+    enabled: true
+
+  - slug: kchain
+    name: K-Chain
+    type: dag
+    rpc: ${LUX_RPC:-https://api.lux.network}/ext/bc/K
+    coin: LUX
+    enabled: true
+
+  # ── Lux subnet chains (EVM) ───────────────────────────────────
 
   - slug: zoo
     name: Zoo
     chain_id: 200200
     type: evm
-    rpc: ${ZOO_RPC:-https://api.lux.network/mainnet/ext/bc/2Y625Kvdd4wZ5LKx9kLSf1jGALyARmXVN1YsTb4F3Hzv4bPDbp/rpc}
+    rpc: ${ZOO_RPC:-https://api.lux.network/ext/bc/Zoo/rpc}
     coin: ZOO
     enabled: true
     indexer: { poll_interval: 30s }
@@ -78,7 +131,7 @@ chains:
     name: Hanzo
     chain_id: 36963
     type: evm
-    rpc: ${HANZO_RPC:-https://api.lux.network/mainnet/ext/bc/2GiQb73CeJESjc4omFv2YtQHZrRgJf25NXPzAr5J6UNHRcDV2F/rpc}
+    rpc: ${HANZO_RPC:-https://api.lux.network/ext/bc/Hanzo/rpc}
     coin: HANZO
     enabled: true
     indexer: { poll_interval: 30s }
@@ -95,7 +148,7 @@ chains:
     name: SPC
     chain_id: 36911
     type: evm
-    rpc: ${SPC_RPC:-https://api.lux.network/mainnet/ext/bc/rtjwvtE1tEvrokmpeYdTq7b2zqZgmybKwR5MLjKMGAR1W78dQ/rpc}
+    rpc: ${SPC_RPC:-https://api.lux.network/ext/bc/SPC/rpc}
     coin: SPC
     enabled: true
     indexer: { poll_interval: 30s }
@@ -104,7 +157,103 @@ chains:
     name: Pars
     chain_id: 494949
     type: evm
-    rpc: ${PARS_RPC:-https://api.lux.network/mainnet/ext/bc/2pUskxqaL5Bpx7uRUGG1fDjPckjxQ4UKX4sLKeaS1NdSVBJd3F/rpc}
+    rpc: ${PARS_RPC:-https://api.lux.network/ext/bc/Pars/rpc}
     coin: PARS
     enabled: true
     indexer: { poll_interval: 30s }
+
+  - slug: dex
+    name: Lux DEX
+    type: evm
+    rpc: ${LUX_RPC:-https://api.lux.network}/ext/bc/D/rpc
+    coin: LUX
+    enabled: true
+    indexer: { poll_interval: 15s }
+    graph:
+      enabled: true
+      subgraphs:
+        - { name: amm,  schema: amm,  enabled: true }
+        - { name: clob, schema: all,  enabled: true }
+
+  # ── External chains (bridge / MPC counterparties) ─────────────
+
+  - slug: ethereum
+    name: Ethereum
+    chain_id: 1
+    type: evm
+    rpc: ${ETH_RPC:-https://eth.llamarpc.com}
+    coin: ETH
+    enabled: false
+    graph:
+      enabled: false
+      subgraphs:
+        - { name: uniswap-v3, schema: uniswap-v3, enabled: true }
+
+  - slug: arbitrum
+    name: Arbitrum One
+    chain_id: 42161
+    type: evm
+    rpc: ${ARB_RPC:-https://arb1.arbitrum.io/rpc}
+    coin: ETH
+    enabled: false
+
+  - slug: optimism
+    name: Optimism
+    chain_id: 10
+    type: evm
+    rpc: ${OP_RPC:-https://mainnet.optimism.io}
+    coin: ETH
+    enabled: false
+
+  - slug: base
+    name: Base
+    chain_id: 8453
+    type: evm
+    rpc: ${BASE_RPC:-https://mainnet.base.org}
+    coin: ETH
+    enabled: false
+
+  - slug: polygon
+    name: Polygon
+    chain_id: 137
+    type: evm
+    rpc: ${POLYGON_RPC:-https://polygon-rpc.com}
+    coin: MATIC
+    enabled: false
+
+  - slug: bsc
+    name: BNB Chain
+    chain_id: 56
+    type: evm
+    rpc: ${BSC_RPC:-https://bsc-dataseed.binance.org}
+    coin: BNB
+    enabled: false
+
+  - slug: avalanche
+    name: Avalanche C-Chain
+    chain_id: 43114
+    type: evm
+    rpc: ${AVAX_RPC:-https://api.avax.network/ext/bc/C/rpc}
+    coin: AVAX
+    enabled: false
+
+  - slug: solana
+    name: Solana
+    type: solana
+    rpc: ${SOL_RPC:-https://api.mainnet-beta.solana.com}
+    coin: SOL
+    enabled: false
+
+  - slug: bitcoin
+    name: Bitcoin
+    type: bitcoin
+    rpc: ${BTC_RPC:-}
+    coin: BTC
+    enabled: false
+
+  - slug: cosmos
+    name: Cosmos Hub
+    type: cosmos
+    rpc: ${ATOM_RPC:-https://cosmos-rpc.publicnode.com}
+    coin: ATOM
+    enabled: false
