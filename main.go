@@ -1,25 +1,24 @@
-// Package main is the unified explorer entry point.
+// Package main is the unified Lux explorer: a single Go binary that embeds
+// the SPA, indexes one or more chains via github.com/luxfi/indexer, runs a
+// per-chain GraphQL engine via github.com/luxfi/graph, and exposes the
+// admin/realtime API and frontend assets on one HTTP listener.
 //
-// Runtime-mutable chain registry with mDNS discovery and WebSocket realtime.
+// Build: go build -o explorer .
+// Run:   explorer --config /etc/explorer/chains.yaml
 //
-// Build: GOWORK=off go build -o explorer .
-// Run:   explorer --config chains.yaml
-//        explorer --mdns=false --port 8090
+// Routes:
 //
-// Env:
-//   PORT             — HTTP port (default 8090)
-//   EXPLORER_CONFIG  — path to chains.yaml
-//   EXPLORER_MDNS    — enable mDNS discovery (default true)
-//   CHAINS           — inline chain list: "cchain:http://...,zoo:http://..."
-//
-// Admin API:
-//   GET    /v1/explorer/admin/chains        — list chains
-//   POST   /v1/explorer/admin/chains        — add chain
-//   PUT    /v1/explorer/admin/chains/{slug} — update chain
-//   DELETE /v1/explorer/admin/chains/{slug} — remove chain
-//
-// Realtime:
-//   WS /v1/explorer/realtime — subscribe to blocks/transactions per chain
+//	/                                       SPA (embedded; SPA-routing fallback)
+//	/envs.js                                runtime config window.ENV = {...}
+//	/icon.svg, /logo.svg                    per-host brand assets (disk override)
+//	/health                                 service health
+//	/v1/indexer/*                           default chain explorer API
+//	/v1/indexer/{slug}/*                    per-chain explorer API
+//	/v1/explorer/{slug}/*                   legacy alias for /v1/indexer/{slug}
+//	/v1/graph/{slug}/{subgraph}/graphql     per-chain, per-subgraph GraphQL
+//	/v1/explorer/admin/chains[/{slug}]      runtime registry CRUD
+//	/v1/explorer/realtime                   WebSocket realtime hub
+//	/v1/explorer/realtime/stats             realtime stats
 package main
 
 import (
@@ -31,100 +30,151 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"path/filepath"
+	"strings"
 	"syscall"
 	"time"
 )
 
+var version = "dev"
+
 func main() {
-	port := flag.Int("port", envInt("PORT", 8090), "HTTP port")
-	configFile := flag.String("config", env("EXPLORER_CONFIG", ""), "chains.yaml path")
-	enableMDNS := flag.Bool("mdns", envBool("EXPLORER_MDNS", true), "auto-discover local chains via mDNS")
+	var (
+		httpAddr   = flag.String("http", "", "HTTP listen address (default :8090 / $HTTP_ADDR)")
+		dataDir    = flag.String("data", "", "Data directory (default $DATA_DIR or ~/.explorer/data)")
+		configPath = flag.String("config", "", "Path to chains.yaml ($EXPLORER_CONFIG)")
+		enableMDNS = flag.Bool("mdns", envBool("EXPLORER_MDNS", false), "Auto-discover chains via mDNS")
+		showVer    = flag.Bool("version", false, "Show version and exit")
+	)
 	flag.Parse()
+
+	if *showVer {
+		fmt.Printf("explorer %s (%s)\n", version, fingerprint())
+		os.Exit(0)
+	}
+
+	if *httpAddr == "" {
+		*httpAddr = env("HTTP_ADDR", ":8090")
+		if p := os.Getenv("PORT"); p != "" && *httpAddr == ":8090" {
+			*httpAddr = ":" + p
+		}
+	}
+	if *dataDir == "" {
+		home, _ := os.UserHomeDir()
+		*dataDir = env("DATA_DIR", filepath.Join(home, ".explorer", "data"))
+	}
+	if *configPath == "" {
+		*configPath = env("EXPLORER_CONFIG", "")
+	}
+	if *configPath == "" {
+		*configPath = findConfig(*dataDir)
+	}
+
+	var cfg Config
+	if *configPath != "" {
+		c, err := LoadConfig(*configPath)
+		if err != nil {
+			log.Fatalf("[explorer] config: %v", err)
+		}
+		cfg = c
+	}
+	if cfg.DataDir == "" {
+		cfg.DataDir = *dataDir
+	}
+	if cfg.HTTPAddr == "" {
+		cfg.HTTPAddr = *httpAddr
+	}
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
 	sigCh := make(chan os.Signal, 1)
 	signal.Notify(sigCh, syscall.SIGINT, syscall.SIGTERM)
-	go func() {
-		<-sigCh
-		log.Println("[explorer] shutdown signal received")
-		cancel()
-	}()
+	go func() { <-sigCh; log.Println("[explorer] shutdown"); cancel() }()
 
-	// Chain registry (runtime mutable)
 	registry := NewChainRegistry()
+	supervisor := NewChainSupervisor(cfg.DataDir)
+	registry.AttachSupervisor(supervisor)
 
-	// Load from config file
-	if *configFile != "" {
-		if err := registry.LoadFromFile(*configFile); err != nil {
-			log.Fatalf("[explorer] config: %v", err)
+	for _, c := range cfg.Chains {
+		c.Source = "config"
+		if err := registry.Add(c); err != nil {
+			log.Printf("[explorer] skip %s from config: %v", c.Slug, err)
 		}
 	}
 
-	// Load from env
-	if chains := env("CHAINS", ""); chains != "" {
+	if chains := os.Getenv("CHAINS"); chains != "" {
 		registry.LoadFromEnv(chains)
 	}
 
-	// Start mDNS discovery
 	if *enableMDNS {
 		go registry.StartMDNSDiscovery()
 	}
 
-	// Start realtime hub
 	go registry.hub.Run(ctx)
+	go supervisor.Wait(ctx)
 
-	// HTTP mux
+	frontend, err := NewFrontend(cfg, registry)
+	if err != nil {
+		log.Fatalf("[explorer] frontend: %v", err)
+	}
+
 	mux := http.NewServeMux()
 
-	// Health
 	mux.HandleFunc("GET /health", func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		json.NewEncoder(w).Encode(map[string]any{
-			"status": "ok",
-			"chains": registry.Count(),
+			"status":  "ok",
+			"version": version,
+			"chains":  registry.Count(),
 		})
 	})
 
-	// Admin API
 	mux.HandleFunc("GET /v1/explorer/admin/chains", registry.HandleList)
 	mux.HandleFunc("POST /v1/explorer/admin/chains", registry.HandleAdd)
 	mux.HandleFunc("PUT /v1/explorer/admin/chains/{slug}", registry.HandleUpdate)
 	mux.HandleFunc("DELETE /v1/explorer/admin/chains/{slug}", registry.HandleRemove)
 
-	// Realtime WebSocket
 	mux.HandleFunc("/v1/explorer/realtime", registry.hub.HandleRealtime)
-
-	// Realtime stats
 	mux.HandleFunc("GET /v1/explorer/realtime/stats", func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		json.NewEncoder(w).Encode(registry.hub.Stats())
 	})
 
-	log.Printf("[explorer] listening :%d (%d chains, mdns=%v)", *port, registry.Count(), *enableMDNS)
+	supervisor.MountRoutes(mux)
+	frontend.Mount(mux)
 
-	srv := &http.Server{
-		Addr:              fmt.Sprintf(":%d", *port),
-		Handler:           mux,
-		ReadHeaderTimeout: 10 * time.Second,
-		ReadTimeout:       30 * time.Second,
-		WriteTimeout:      60 * time.Second,
-		IdleTimeout:       120 * time.Second,
-		MaxHeaderBytes:    1 << 16,
-	}
+	log.Printf("[explorer] %s listening %s data=%s chains=%d mdns=%v %s",
+		version, cfg.HTTPAddr, cfg.DataDir, registry.Count(), *enableMDNS, fingerprint())
 
+	server := &http.Server{Addr: cfg.HTTPAddr, Handler: withSecurity(mux)}
 	go func() {
-		if err := srv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
+		if err := server.ListenAndServe(); err != nil && err != http.ErrServerClosed {
 			log.Fatalf("[explorer] server: %v", err)
 		}
 	}()
-
 	<-ctx.Done()
-	shutdownCtx, shutdownCancel := context.WithTimeout(context.Background(), 5*time.Second)
-	defer shutdownCancel()
-	srv.Shutdown(shutdownCtx)
+	shutCtx, shutCancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer shutCancel()
+	server.Shutdown(shutCtx)
 	log.Println("[explorer] stopped")
+}
+
+// withSecurity adds the baseline security headers and CORS preflight handler.
+func withSecurity(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("X-Content-Type-Options", "nosniff")
+		w.Header().Set("X-Frame-Options", "DENY")
+		w.Header().Set("Referrer-Policy", "strict-origin-when-cross-origin")
+		w.Header().Set("Access-Control-Allow-Origin", "*")
+		w.Header().Set("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS")
+		w.Header().Set("Access-Control-Allow-Headers", "Content-Type, Authorization")
+		if r.Method == http.MethodOptions {
+			w.WriteHeader(http.StatusNoContent)
+			return
+		}
+		next.ServeHTTP(w, r)
+	})
 }
 
 func env(key, fallback string) string {
@@ -134,23 +184,26 @@ func env(key, fallback string) string {
 	return fallback
 }
 
-func envInt(key string, fallback int) int {
-	if v := os.Getenv(key); v != "" {
-		var n int
-		fmt.Sscanf(v, "%d", &n)
-		return n
-	}
-	return fallback
-}
-
 func envBool(key string, fallback bool) bool {
-	v := os.Getenv(key)
-	switch v {
+	switch strings.ToLower(os.Getenv(key)) {
 	case "true", "1", "yes":
 		return true
 	case "false", "0", "no":
 		return false
-	default:
-		return fallback
 	}
+	return fallback
+}
+
+// findConfig probes for a chains.yaml in the standard locations.
+func findConfig(dataDir string) string {
+	for _, p := range []string{
+		filepath.Join(dataDir, "chains.yaml"),
+		"chains.yaml",
+		"/etc/explorer/chains.yaml",
+	} {
+		if _, err := os.Stat(p); err == nil {
+			return p
+		}
+	}
+	return ""
 }

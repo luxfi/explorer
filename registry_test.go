@@ -308,9 +308,6 @@ func TestEnvHelpers(t *testing.T) {
 	if env("NONEXISTENT_KEY_12345", "fallback") != "fallback" {
 		t.Fatal("env fallback failed")
 	}
-	if envInt("NONEXISTENT_KEY_12345", 42) != 42 {
-		t.Fatal("envInt fallback failed")
-	}
 	if envBool("NONEXISTENT_KEY_12345", true) != true {
 		t.Fatal("envBool fallback failed")
 	}

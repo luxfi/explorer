@@ -1,7 +1,6 @@
 # Binaries
 bin/
-explorer
-explorer-unified
+/explorer
 *.exe
 *.test
 
