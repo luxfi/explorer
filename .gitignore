@@ -1,1 +1,37 @@
-# rebuild 1776010884
+# Binaries
+bin/
+explorer
+explorer-unified
+*.exe
+*.test
+
+# Coverage
+coverage.out
+coverage.html
+
+# Go workspace
+go.work
+go.work.sum
+
+# Editor
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# OS
+.DS_Store
+
+# Local
+.env
+.env.local
+*.local
+
+# AI assistant context (not committed)
+AGENTS.md
+CLAUDE.md
+GEMINI.md
+QWEN.md
+
+# Runtime
+logs/
