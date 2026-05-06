@@ -41,6 +41,11 @@ WORKDIR /src/explorer
 COPY . .
 COPY --from=frontend /app/out ./static
 
+# proxy.golang.org has inconsistent caching for hanzoai/replicate@v0.6.0
+# (different POPs serve different zip hashes). Regenerate go.sum from the
+# proxy state we actually see at build time and skip sum.golang.org.
+RUN rm -f go.sum && GOSUMDB=off go mod download
+
 RUN CGO_ENABLED=1 CGO_CFLAGS="-D_LARGEFILE64_SOURCE" \
     go build -trimpath \
       -ldflags="-s -w -X main.version=${VERSION}" \

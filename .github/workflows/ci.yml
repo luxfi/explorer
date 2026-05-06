@@ -25,6 +25,11 @@ jobs:
       run: sudo apt-get update -qq && sudo apt-get install -y --no-install-recommends gcc libsqlite3-dev
     - uses: actions/setup-go@v5
       with: { go-version-file: explorer/go.mod }
+    - name: Refresh go.sum (proxy cache inconsistency)
+      working-directory: explorer
+      run: rm -f go.sum && GOSUMDB=off go mod download
+      env:
+        GOSUMDB: "off"
     - name: Build
       working-directory: explorer
       run: go build ./...
