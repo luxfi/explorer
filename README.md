@@ -1,257 +1,175 @@
 # Explorer
 
-Combined block explorer: chain indexer + subgraph engine + frontend in a single image.
+Single-binary Lux explorer: chain indexer, GraphQL engine, and SPA frontend
+in one Go process. Imports [`luxfi/indexer`](https://github.com/luxfi/indexer)
+and [`luxfi/graph`](https://github.com/luxfi/graph) as libraries; embeds the
+[`luxfi/explore`](https://github.com/luxfi/explore) Next.js build via
+`go:embed`.
 
 ```
-ghcr.io/luxfi/indexer   -- chain data: blocks, txs, tokens, contracts (SQLite)
-ghcr.io/luxfi/graph     -- subgraph events: swaps, pools, DeFi, GraphQL (SQLite)
-ghcr.io/luxfi/explore   -- Next.js frontend
-ghcr.io/luxfi/explorer  -- all three combined (this image)
+ghcr.io/luxfi/explorer
+  -> indexes one or more EVM chains  (luxfi/indexer)
+  -> exposes per-chain GraphQL       (luxfi/graph)
+  -> serves embedded SPA + REST API  (luxfi/explore)
 ```
 
-Each component runs standalone for independent scaling, or together in one container.
+## Routes
 
-## Architecture
+| Path                                              | Purpose                          |
+|---------------------------------------------------|----------------------------------|
+| `/`                                               | SPA (embedded; SPA-routing fallback) |
+| `/envs.js`                                        | Runtime config `window.ENV = {...}` |
+| `/icon.svg`, `/logo.svg`                          | Per-host brand assets (disk override) |
+| `/health`                                         | Service health                   |
+| `/v1/indexer/*`                                   | Default chain explorer API       |
+| `/v1/indexer/{slug}/*`                            | Per-chain explorer API           |
+| `/v1/explorer/{slug}/*`                           | Legacy alias for `/v1/indexer/{slug}` |
+| `/v1/graph/{slug}/{subgraph}/graphql`             | Per-chain, per-subgraph GraphQL  |
+| `/v1/explorer/admin/chains[/{slug}]`              | Runtime registry CRUD            |
+| `/v1/explorer/realtime`                           | WebSocket realtime hub           |
+| `/v1/explorer/realtime/stats`                     | Realtime stats                   |
 
-```
-                          +------------------+
-                          |   Load Balancer  |
-                          |  (hanzo/ingress) |
-                          +--------+---------+
-                                   |
-                          +--------v---------+
-                          |    explorer:8090  |
-                          |   (single binary) |
-                          +--+-----+------+--+
-                             |     |      |
-               +-------------+  +--+--+  +-------------+
-               |                |     |                 |
-        +------v------+  +-----v-+  +v-----------+     |
-        |   indexer    |  | graph |  |   explore   |    |
-        | /v1/explorer |  | /gql  |  | /* (static) |    |
-        +------+------+  +---+---+  +-------------+    |
-               |              |                         |
-        +------v--------------v------+          +-------v-------+
-        |  SQLite per-chain (WAL)    |          |  ZapDB KV     |
-        |  /data/{chain}/index.db    |          |  fast lookups |
-        +----------------------------+          +---------------+
-               |
-        +------v-----------------------+
-        |  Replicate -> S3 (optional)  |
-        |  E2E PQ encrypted (ML-KEM)   |
-        +------------------------------+
-
-    RPC Sources (per network):
-    +-----------------------------------------------+
-    | api.lux.network/{mainnet,testnet,devnet}      |
-    |   /ext/bc/C/rpc           C-Chain             |
-    |   /ext/bc/{blockchain_id}/rpc  Subnet chains  |
-    +-----------------------------------------------+
-```
-
-## Quick Start (Local Dev)
+## Quick Start
 
 ```bash
-# Clone
-git clone https://github.com/luxfi/explorer-combined.git
-cd explorer-combined
-
-# Run against testnet C-Chain
-docker compose up
-
-# Or run the image directly
 docker run -p 8090:8090 \
-  -e RPC_ENDPOINT=https://api.lux.network/testnet/ext/bc/C/rpc \
+  -v $(pwd)/chains.example.yaml:/etc/explorer/chains.yaml:ro \
   -v explorer-data:/data \
-  ghcr.io/luxfi/explorer
+  ghcr.io/luxfi/explorer:latest \
+  --config /etc/explorer/chains.yaml
 ```
 
-Open http://localhost:8090 to see the explorer frontend.
-
-## Run Modes
+Or with compose:
 
 ```bash
-# Combined (default) -- indexes chain + subgraphs, serves API + frontend
-docker run -p 8090:8090 \
-  -e RPC_ENDPOINT=http://node:9650/ext/bc/C/rpc \
-  -v data:/data \
-  ghcr.io/luxfi/explorer
-
-# Indexer only (chain data API)
-docker run -p 8090:8090 \
-  -v data:/data \
-  ghcr.io/luxfi/explorer \
-  indexer --chain cchain --rpc http://node:9650/ext/bc/C/rpc
-
-# Graph only (subgraph GraphQL)
-docker run -p 4000:4000 \
-  -v data:/data \
-  ghcr.io/luxfi/explorer \
-  graph --rpc http://node:9650/ext/bc/C/rpc
+docker compose up
 ```
 
-## Multi-Chain Configuration
+## Configuration
 
-Use `chains.yaml` to index multiple chains in one instance.
-See `chains.example.yaml` for a complete template with all Lux networks.
+`chains.yaml` is the single source of truth. Every aspect of the deploy --
+chains, branding, GraphQL subgraphs, network switcher links -- is per-chain
+customizable. See [`chains.example.yaml`](chains.example.yaml) for the full
+schema.
+
+```yaml
+data_dir: /data
+http_addr: :8090
+
+brand_default:
+  name: Lux Explorer
+  coin: LUX
+  accent_color: "#5cf"
+
+networks:
+  - { label: Mainnet, domain: explorer.lux.network, chain_id: 96369 }
+
+chains:
+  - slug: cchain
+    name: Lux C-Chain
+    chain_id: 96369
+    type: evm
+    rpc: https://api.lux.network/mainnet/ext/bc/C/rpc
+    coin: LUX
+    enabled: true
+    default: true
+
+    indexer:
+      poll_interval: 30s
+
+    graph:
+      enabled: true
+      subgraphs:
+        - { name: amm, schema: amm, enabled: true }
+
+    brand:
+      name: Lux C-Chain
+      accent_color: "#5cf"
+```
+
+`$ENV_VAR` substitution in `rpc:` / `ws:` lets one file template every
+network -- mount it read-only and inject secrets via env vars.
+
+## Per-Network Customization
+
+The same image powers every deploy. To rebrand for a different network:
+
+1. Mount a different `chains.yaml`.
+2. Optionally mount `icon.svg` / `logo.svg` at the path referenced by
+   `chains.yaml` -- they are read from disk per-request, not embedded.
+3. Set environment variables to fill the `${VAR}` placeholders.
+
+No image rebuild needed. The SPA reads chain list and brand at runtime from
+`/envs.js`.
+
+## Runtime Registry
+
+Chains can be added, updated, and removed at runtime without restart:
 
 ```bash
-docker run -p 8090:8090 \
-  -v ./chains.yaml:/etc/explorer/chains.yaml \
-  -v data:/data \
-  ghcr.io/luxfi/explorer --config /etc/explorer/chains.yaml
+# Add
+curl -X POST http://localhost:8090/v1/explorer/admin/chains \
+  -H 'Content-Type: application/json' \
+  -d '{"slug":"new","name":"New","chain_id":123,"rpc":"http://node:8545","type":"evm"}'
+
+# List
+curl http://localhost:8090/v1/explorer/admin/chains
+
+# Remove
+curl -X DELETE http://localhost:8090/v1/explorer/admin/chains/new
 ```
 
-## Per-Network Deployment
+Adding a chain spawns its indexer + (optional) graph workers; removing
+cancels them and frees the routes.
 
-### Mainnet
+## mDNS Discovery
+
+Set `EXPLORER_MDNS=true` to auto-register chains advertised by local Lux
+nodes (`_luxd._tcp`, `_zood._tcp`, `_hanzod._tcp`, `_parsd._tcp`). The
+explorer queries `info.getChains` on the discovered node and registers each
+tracked chain. mDNS-sourced chains never override config-sourced entries.
+
+## Storage Layout
+
+```
+/data/
+  cchain/
+    query/indexer.db         (SQLite WAL, indexer)
+    {zapdb}/                 (KV store)
+    graph/
+      amm/graph.db           (SQLite WAL, per-subgraph)
+  zoo/
+    ...
+```
+
+Each chain (and each subgraph) owns an isolated SQLite + KV store. WAL is
+optionally streamed to S3 with PQ encryption when `REPLICATE_S3_ENDPOINT`
+is set -- see `luxfi/indexer/daemon`.
+
+## Local Build
 
 ```bash
-docker run -p 8090:8090 \
-  -e RPC_ENDPOINT=https://api.lux.network/mainnet/ext/bc/C/rpc \
-  -e NETWORK=mainnet \
-  -e CHAIN_ID=96369 \
-  -v data:/data \
-  ghcr.io/luxfi/explorer:v0.1.0
+# Sibling layout: ~/work/lux/{indexer,graph,explorer}
+cd ~/work/lux/explorer
+go build -o explorer .
 ```
 
-Mainnet chains and their RPC endpoints:
+`go.mod` uses local `replace` directives pointing at `../indexer` and
+`../graph`. Production CI clones all three repos into the same layout
+inside the Docker build.
 
-| Chain   | EVM Chain ID | RPC Endpoint                                                         |
-|---------|-------------|----------------------------------------------------------------------|
-| C-Chain | 96369       | `https://api.lux.network/mainnet/ext/bc/C/rpc`                      |
-| Zoo     | 200200      | `https://api.lux.network/mainnet/ext/bc/2Y625Kvdd.../rpc`           |
-| Hanzo   | 36963       | `https://api.lux.network/mainnet/ext/bc/2GiQb73Ce.../rpc`           |
-| SPC     | 36911       | `https://api.lux.network/mainnet/ext/bc/rtjwvtE1t.../rpc`           |
-| Pars    | 494949      | `https://api.lux.network/mainnet/ext/bc/2pUskxqaL.../rpc`           |
-
-### Testnet
+## Endpoints (curl examples)
 
 ```bash
-docker run -p 8090:8090 \
-  -e RPC_ENDPOINT=https://api.lux.network/testnet/ext/bc/C/rpc \
-  -e NETWORK=testnet \
-  -e CHAIN_ID=96368 \
-  -v data:/data \
-  ghcr.io/luxfi/explorer:v0.1.0
+curl http://localhost:8090/health
+curl http://localhost:8090/v1/indexer/cchain/blocks/latest
+curl -X POST http://localhost:8090/v1/graph/cchain/amm/graphql \
+  -H 'Content-Type: application/json' \
+  -d '{"query":"{ swaps(first:5) { id amount0 amount1 } }"}'
 ```
-
-### Devnet
-
-```bash
-docker run -p 8090:8090 \
-  -e RPC_ENDPOINT=https://api.lux.network/devnet/ext/bc/C/rpc \
-  -e NETWORK=devnet \
-  -e CHAIN_ID=96370 \
-  -v data:/data \
-  ghcr.io/luxfi/explorer:v0.1.0
-```
-
-## White-Label
-
-Override branding via environment variables. No code changes needed.
-
-```bash
-docker run -p 8090:8090 \
-  -e RPC_ENDPOINT=http://node:8545 \
-  -e CHAIN_NAME="My Chain" \
-  -e COIN_SYMBOL=MYC \
-  -e COIN_DECIMALS=18 \
-  -e LOGO_URL=https://example.com/logo.svg \
-  -e FAVICON_URL=https://example.com/favicon.ico \
-  -e BRAND_COLOR="#FF6600" \
-  ghcr.io/luxfi/explorer
-```
-
-| Variable       | Default       | Description                      |
-|---------------|---------------|----------------------------------|
-| CHAIN_NAME    | Lux C-Chain   | Display name in header/title     |
-| COIN_SYMBOL   | LUX           | Native coin ticker               |
-| COIN_DECIMALS | 18            | Native coin decimal places       |
-| LOGO_URL      | (Lux logo)    | URL or path to header logo       |
-| FAVICON_URL   | (Lux favicon) | URL or path to favicon           |
-| BRAND_COLOR   | #1a1a2e       | Primary brand color (hex)        |
-
-White-label detection in production uses hostname-based routing.
-Each `*.lux.network` subdomain resolves to the correct chain branding automatically.
-
-## PQ Encrypted Backup
-
-The explorer supports post-quantum encrypted backups to S3-compatible storage using ML-KEM-768.
-
-```bash
-docker run -p 8090:8090 \
-  -e RPC_ENDPOINT=https://api.lux.network/mainnet/ext/bc/C/rpc \
-  -e BACKUP_ENABLED=true \
-  -e BACKUP_S3_ENDPOINT=https://s3.lux.network \
-  -e BACKUP_S3_BUCKET=explorer-backups \
-  -e BACKUP_S3_ACCESS_KEY=<from-kms> \
-  -e BACKUP_S3_SECRET_KEY=<from-kms> \
-  -e BACKUP_INTERVAL=6h \
-  -e BACKUP_PQ_ENCRYPT=true \
-  -e BACKUP_PQ_PUBLIC_KEY=/etc/explorer/backup.pub \
-  -v ./backup.pub:/etc/explorer/backup.pub:ro \
-  -v data:/data \
-  ghcr.io/luxfi/explorer
-```
-
-Backup flow:
-1. SQLite checkpoint (WAL flush)
-2. Snapshot all chain databases
-3. Encrypt with ML-KEM-768 (post-quantum KEM + AES-256-GCM)
-4. Upload to S3 with content-addressed naming
-5. Prune old snapshots per retention policy
-
-Store secrets in KMS (kms.hanzo.ai), never in environment files committed to git.
-
-## Performance (LP-104)
-
-Benchmarked against Blockscout (Elixir) on identical hardware (4 vCPU, 8 GB RAM).
-
-| Metric                    | Explorer (Go+SQLite) | Blockscout (Elixir+PG) |
-|--------------------------|---------------------|------------------------|
-| Block indexing (blocks/s) | 850                 | 120                    |
-| API latency p50 (ms)      | 2.1                 | 18                     |
-| API latency p99 (ms)      | 8.4                 | 145                    |
-| Memory at 1M blocks (MB)  | 180                 | 2400                   |
-| Disk at 1M blocks (GB)    | 1.2                 | 28                     |
-| Cold start to serving (s) | 0.8                 | 45                     |
-| Concurrent requests (rps) | 12,000              | 800                    |
-
-### Cost Comparison (monthly, per chain)
-
-| Setup               | Explorer        | Blockscout         |
-|--------------------|-----------------|--------------------|
-| Compute            | 1 vCPU / 512 MB | 4 vCPU / 8 GB      |
-| Database           | Embedded SQLite | PostgreSQL 2 vCPU  |
-| Storage            | 2 GB SSD        | 30 GB SSD          |
-| Estimated cost/mo  | ~$5             | ~$80               |
-| 5 chains x 3 nets | ~$75/mo         | ~$1,200/mo         |
-
-## Endpoints
-
-| Path               | Description                        |
-|--------------------|------------------------------------|
-| `/health`          | Health check (200 if indexing)      |
-| `/v1/explorer/*`   | Chain data REST API                 |
-| `/v1/explorer/stats` | Block count, tx count, sync status |
-| `/graphql`         | Subgraph-compatible GraphQL         |
-| `/*`               | Embedded frontend (static)          |
-
-## Environment Variables
-
-| Variable         | Default    | Description                              |
-|-----------------|------------|------------------------------------------|
-| RPC_ENDPOINT    | (required) | EVM JSON-RPC URL                         |
-| HTTP_ADDR       | :8090      | Listen address                           |
-| DATA_DIR        | /data      | Database storage directory               |
-| NETWORK         | mainnet    | Network name (mainnet/testnet/devnet)    |
-| CHAIN_ID        | (auto)     | EVM chain ID override                    |
-| LOG_LEVEL       | info       | Log level (debug/info/warn/error)        |
 
 ## Related
 
-- [`luxfi/indexer`](https://github.com/luxfi/indexer) -- Go chain indexer
-- [`luxfi/graph`](https://github.com/luxfi/graph) -- Subgraph engine, Graph Node replacement
-- [`luxfi/explore`](https://github.com/luxfi/explore) -- Next.js frontend
-- [`luxfi/explorer-v1`](https://github.com/luxfi/explorer-v1) -- Legacy Elixir stack (archived)
+- [`luxfi/indexer`](https://github.com/luxfi/indexer) -- chain indexer library
+- [`luxfi/graph`](https://github.com/luxfi/graph) -- per-chain GraphQL library
+- [`luxfi/explore`](https://github.com/luxfi/explore) -- Next.js SPA
