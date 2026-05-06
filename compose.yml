@@ -5,17 +5,16 @@ services:
       dockerfile: Dockerfile
       args:
         VERSION: dev
+    image: ghcr.io/luxfi/explorer:dev
     ports:
       - "8090:8090"
     volumes:
       - explorer-data:/data
       - ./chains.example.yaml:/etc/explorer/chains.yaml:ro
     environment:
-      - RPC_ENDPOINT=https://api.lux.network/testnet/ext/bc/C/rpc
-      - NETWORK=testnet
-      - DATA_DIR=/data
-      - HTTP_ADDR=:8090
-      - LOG_LEVEL=debug
+      DATA_DIR: /data
+      HTTP_ADDR: :8090
+      EXPLORER_CONFIG: /etc/explorer/chains.yaml
     restart: unless-stopped
 
 volumes:
