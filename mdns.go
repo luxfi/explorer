@@ -19,7 +19,6 @@ var daemonServices = []struct {
 }{
 	{"_luxd._tcp", "luxd", "lux"},
 	{"_zood._tcp", "zood", "zoo"},
-	{"_lqd._tcp", "lqd", "liquid"},
 	{"_hanzod._tcp", "hanzod", "hanzo"},
 	{"_parsd._tcp", "parsd", "pars"},
 }
