@@ -87,8 +87,3 @@ require (
 	modernc.org/memory v1.11.0 // indirect
 	modernc.org/sqlite v1.48.0 // indirect
 )
-
-replace (
-	github.com/luxfi/graph => ../graph
-	github.com/luxfi/indexer => ../indexer
-)
