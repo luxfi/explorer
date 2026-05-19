@@ -164,8 +164,12 @@ github.com/luxfi/database v1.17.44 h1:hfiTls7sqbweW+o4iaZqB8P997paC+vpgWmhN6v5MJ
 github.com/luxfi/database v1.17.44/go.mod h1:6Ey5y3I0WNLHbxIlIdFqUuKfBg+b0fAgTA8FgRgQ8zg=
 github.com/luxfi/geth v1.16.69 h1:CHO6xTZ+A+3itk94ts4uyVRJajNVP3RxWTjJp5qGOlk=
 github.com/luxfi/geth v1.16.69/go.mod h1:8eEO1hW5sa6OH2VeCMaCPnRz28JBxFvCPBCWPLsU2ck=
+github.com/luxfi/graph v1.2.0 h1:jwOXnlDGfx2TjqE5GhP5T3Rv9cGh7jHSfV6DceggmAc=
+github.com/luxfi/graph v1.2.0/go.mod h1:bf35zaU3Nm5tiJj1d5SoZP8DYYJl4aCVp32rOY5vj2w=
 github.com/luxfi/ids v1.2.9 h1:+yjdhXW99drnd2Zlp1u/p8k3G23W3/1btJQ4ogHawUI=
 github.com/luxfi/ids v1.2.9/go.mod h1:khJOEdOPxd22yn0jcVrnbX1ADa0GHn5Y74gvCzN5BYc=
+github.com/luxfi/indexer v1.4.1 h1:6NXqd1aDXvhIN13U0O3UvehDjG/9fQ0tb+w8ZpTjWsw=
+github.com/luxfi/indexer v1.4.1/go.mod h1:h5U3td/esXhbkDojcpvFQtSCQ9USrYMnnmtNk56ei+Y=
 github.com/luxfi/log v1.4.1 h1:rIfFRodb9jrD/w7KayaUk0Oc+37PaQQdKEEMJCjR8gw=
 github.com/luxfi/log v1.4.1/go.mod h1:64IE3xRMJcpkQwnPUfJw3pDj7wU0kRS7BZ9wM7R72jk=
 github.com/luxfi/math v1.2.4 h1:iVz7s0gToCNUU/2cLT8gUa8MLzc0YRp4jBmeXBeKdXk=
