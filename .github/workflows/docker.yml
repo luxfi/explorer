@@ -14,7 +14,7 @@ permissions:
 # under OrbStack — zero Rosetta is allowed. Semver tags only.
 jobs:
   docker:
-    runs-on: lux-build-linux-amd64
+    runs-on: hanzo-build-linux-amd64
     steps:
       - uses: actions/checkout@v4
       - uses: docker/setup-qemu-action@v3
