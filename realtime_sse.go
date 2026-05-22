@@ -125,9 +125,17 @@ func (r *sseRegistry) fanout(eventType, chain string, body []byte, wildcardEnvel
 // name. main.go mounts one per path.
 func (h *RealtimeHub) HandleSSE(channel string) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		// SSE response headers — set BEFORE the HEAD short-circuit so
-		// the pre-flight sees them and the SPA's `u.ok` check passes
-		// (200 + text/event-stream → open EventSource).
+		// HEAD pre-flight: GCP HTTP/2 LB + Traefik can 502 on HEAD
+		// responses that carry `Connection: keep-alive` together with
+		// a streaming content-type. Keep the HEAD response minimal —
+		// the SPA only checks `r.ok` (status) anyway.
+		if r.Method == http.MethodHead {
+			w.Header().Set("Content-Type", "text/event-stream")
+			w.WriteHeader(http.StatusOK)
+			return
+		}
+
+		// SSE response headers for the actual GET stream.
 		w.Header().Set("Content-Type", "text/event-stream")
 		w.Header().Set("Cache-Control", "no-cache")
 		w.Header().Set("Connection", "keep-alive")
@@ -135,14 +143,6 @@ func (h *RealtimeHub) HandleSSE(channel string) http.HandlerFunc {
 		// this the first event can sit in a buffer for ~5s, defeating
 		// the whole point of SSE.
 		w.Header().Set("X-Accel-Buffering", "no")
-
-		// HEAD pre-flight from EventSource open. Standard HTTP requires
-		// HEAD to return the same headers as GET would, with no body.
-		// We've already set them above; just acknowledge and return.
-		if r.Method == http.MethodHead {
-			w.WriteHeader(http.StatusOK)
-			return
-		}
 
 		flusher, ok := w.(http.Flusher)
 		if !ok {
@@ -255,15 +255,22 @@ func writeSSE(w http.ResponseWriter, flusher http.Flusher, event string, payload
 // only this one.
 func (h *RealtimeHub) HandleMultiplexedSSE() http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
+		// HEAD pre-flight: keep the response brief — GCP HTTP/2 load
+		// balancers (and Traefik in some configs) 502 when a HEAD
+		// response carries `Connection: keep-alive` + a streaming
+		// content-type, because they expect HEAD to be a closed-body
+		// response, not an opened SSE stream. Return only Content-Type
+		// + 200, no streaming-only headers.
+		if r.Method == http.MethodHead {
+			w.Header().Set("Content-Type", "text/event-stream")
+			w.WriteHeader(http.StatusOK)
+			return
+		}
+
 		w.Header().Set("Content-Type", "text/event-stream")
 		w.Header().Set("Cache-Control", "no-cache")
 		w.Header().Set("Connection", "keep-alive")
 		w.Header().Set("X-Accel-Buffering", "no")
-
-		if r.Method == http.MethodHead {
-			w.WriteHeader(http.StatusOK)
-			return
-		}
 
 		flusher, ok := w.(http.Flusher)
 		if !ok {
