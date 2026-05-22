@@ -53,20 +53,52 @@ func (f *Frontend) Mount(mux *http.ServeMux) {
 
 // handleSPA serves embedded static assets and falls back to index.html for
 // any path the SPA owns (client-side routing).
+//
+// HEAD-method note: the bundled SPA opens EventSource (Server-Sent Events)
+// channels for live block / token / tx streams and pre-flights each URL
+// with a HEAD request:
+//
+//	fetch(url, {method: 'HEAD'}).then(r => r.ok ? openEventSource() : disable());
+//
+// If we serve a 200 (because of the SPA fallback to index.html), the SPA
+// proceeds to open the EventSource — which then immediately aborts because
+// the response body is text/html, not text/event-stream. Browser logs
+// "EventSource's response has a MIME type ('text/html') that is not
+// 'text/event-stream'" for every channel on every page load — noisy and
+// disables the channel anyway.
+//
+// Fix: return 404 for HEAD requests on the SPA-fallback path. Real assets
+// (anything in `f.root`) still serve normally on HEAD; only the index.html
+// fallback gets the 404 so the SSE pre-flight cleanly fails and the SPA
+// disables that channel on its own. Visible browser load is unchanged
+// because the SPA only HEAD-probes its SSE endpoints, never the SPA URL
+// itself.
 func (f *Frontend) handleSPA(w http.ResponseWriter, r *http.Request) {
 	p := strings.TrimPrefix(r.URL.Path, "/")
 	if p == "" {
+		if r.Method == http.MethodHead {
+			http.NotFound(w, r)
+			return
+		}
 		f.writeIndex(w)
 		return
 	}
 	file, err := f.root.Open(p)
 	if err != nil {
+		if r.Method == http.MethodHead {
+			http.NotFound(w, r)
+			return
+		}
 		f.writeIndex(w)
 		return
 	}
 	defer file.Close()
 	stat, err := file.Stat()
 	if err != nil || stat.IsDir() {
+		if r.Method == http.MethodHead {
+			http.NotFound(w, r)
+			return
+		}
 		f.writeIndex(w)
 		return
 	}
