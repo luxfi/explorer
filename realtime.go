@@ -11,10 +11,15 @@ import (
 	"github.com/gorilla/websocket"
 )
 
-// RealtimeHub manages multi-chain WebSocket subscriptions.
+// RealtimeHub manages multi-chain WebSocket subscriptions, plus a
+// parallel set of SSE subscribers (see realtime_sse.go) so the bundled
+// SPA — which opens EventSource against /blocks, /transactions, etc.
+// — can subscribe to the same broadcast feed without speaking
+// WebSocket.
 type RealtimeHub struct {
 	mu      sync.RWMutex
 	clients map[*wsClient]struct{}
+	sse     *sseRegistry
 }
 
 type wsClient struct {
@@ -42,6 +47,7 @@ type SubscribeRequest struct {
 func NewRealtimeHub() *RealtimeHub {
 	return &RealtimeHub{
 		clients: make(map[*wsClient]struct{}),
+		sse:     newSSERegistry(),
 	}
 }
 
@@ -148,7 +154,14 @@ func (h *RealtimeHub) readPump(c *wsClient) {
 	}
 }
 
-// Broadcast sends an event to all clients subscribed to the given channel+chain.
+// Broadcast sends an event to all clients subscribed to the given
+// channel+chain — both WebSocket (`HandleRealtime`) and SSE
+// (`HandleSSE`).
+//
+// WebSocket clients receive the JSON-encoded RealtimeMessage as a TEXT
+// frame. SSE clients receive the same payload wrapped in the SSE
+// `event: <type>\ndata: <json>\n\n` framing so the EventSource
+// onmessage / addEventListener('<type>', ...) handlers fire cleanly.
 func (h *RealtimeHub) Broadcast(eventType, chain string, data any) {
 	msg := RealtimeMessage{
 		Type:      eventType,
@@ -162,10 +175,8 @@ func (h *RealtimeHub) Broadcast(eventType, chain string, data any) {
 		return
 	}
 
-	// Match: exact channel, channel:chain, or unscoped channel
+	// WebSocket subscribers (existing path).
 	h.mu.RLock()
-	defer h.mu.RUnlock()
-
 	for client := range h.clients {
 		client.mu.Lock()
 		match := client.subs[eventType] || client.subs[eventType+":"+chain]
@@ -174,6 +185,14 @@ func (h *RealtimeHub) Broadcast(eventType, chain string, data any) {
 		if match {
 			client.sendRaw(encoded)
 		}
+	}
+	h.mu.RUnlock()
+
+	// SSE subscribers — wrap in SSE framing once, fan out cheaply.
+	if h.sse != nil {
+		framed := append([]byte("event: "+eventType+"\ndata: "), encoded...)
+		framed = append(framed, '\n', '\n')
+		h.sse.fanout(eventType, chain, framed)
 	}
 }
 
