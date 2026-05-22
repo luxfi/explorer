@@ -146,6 +146,13 @@ func main() {
 		json.NewEncoder(w).Encode(registry.hub.Stats())
 	})
 
+	// /v1/base/realtime — multiplexed SSE channel the bundled SPA opens.
+	// One stream carries every broadcast in a JSON envelope `{event, chain, data}`
+	// that the SPA routes off via its handler map. See realtime_sse.go.
+	muxRealtimeSSE := registry.hub.HandleMultiplexedSSE()
+	mux.HandleFunc("GET /v1/base/realtime", muxRealtimeSSE)
+	mux.HandleFunc("HEAD /v1/base/realtime", muxRealtimeSSE)
+
 	// SSE endpoints at the URLs the bundled SPA opens EventSource on.
 	// See realtime_sse.go for the channel mapping + the back-story on
 	// why each path needs its own handler. Registering HEAD + GET

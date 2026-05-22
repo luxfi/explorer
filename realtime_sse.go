@@ -89,18 +89,32 @@ func (r *sseRegistry) detach(c *sseClient) {
 //   - chain-scoped match (channel + ":" + chain) is checked too so a
 //     subscriber that filtered on "blocks:cchain" sees only cchain
 //     events even if the hub broadcasts blocks across multiple chains
-func (r *sseRegistry) fanout(eventType, chain string, body []byte) {
+//   - wildcard (`*`) — clients attached by HandleMultiplexedSSE receive
+//     every event, but in a different envelope: SSE `data:` carries a
+//     JSON `{event, chain, data}` object the SPA can route off of. The
+//     wildcard `body` is built here; per-channel clients keep using the
+//     prebuilt per-channel framing from Broadcast for cheap reuse.
+func (r *sseRegistry) fanout(eventType, chain string, body []byte, wildcardEnvelope []byte) {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
 	for c := range r.clients {
-		if c.channel != eventType {
+		var payload []byte
+		switch {
+		case c.channel == "*":
+			payload = wildcardEnvelope
+		case c.channel == eventType:
+			payload = body
+		default:
 			continue
 		}
 		if c.chain != "" && c.chain != chain {
 			continue
 		}
+		if payload == nil {
+			continue
+		}
 		select {
-		case c.events <- body:
+		case c.events <- payload:
 		default:
 			// Slow consumer — drop this event rather than block.
 		}
@@ -218,4 +232,81 @@ func (h *RealtimeHub) HandleSSE(channel string) http.HandlerFunc {
 func writeSSE(w http.ResponseWriter, flusher http.Flusher, event string, payload []byte) {
 	fmt.Fprintf(w, "event: %s\ndata: %s\n\n", event, payload)
 	flusher.Flush()
+}
+
+// HandleMultiplexedSSE returns an http.HandlerFunc that fans EVERY hub
+// broadcast into a single SSE stream, wrapping each event in a JSON
+// envelope `{"event":"<channel>","chain":"<slug>","data":<payload>}`.
+//
+// Wire shape the bundled SPA expects at `/v1/base/realtime` — it uses
+// `onmessage` (not event-typed listeners) and routes incoming frames
+// via a handler map keyed off `msg.event`:
+//
+//	client.es.onmessage = o => {
+//	    const c = JSON.parse(o.data);
+//	    const d = this.handlers.get(c.event);
+//	    if (d) for (const m of d) m(c.data);
+//	};
+//
+// So the SPA gets ONE EventSource and receives all event types over it,
+// instead of opening N parallel streams. This is the canonical realtime
+// channel — the per-channel /blocks /transactions /etc. endpoints stay
+// for backward compatibility and external consumers, but the SPA uses
+// only this one.
+func (h *RealtimeHub) HandleMultiplexedSSE() http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "text/event-stream")
+		w.Header().Set("Cache-Control", "no-cache")
+		w.Header().Set("Connection", "keep-alive")
+		w.Header().Set("X-Accel-Buffering", "no")
+
+		if r.Method == http.MethodHead {
+			w.WriteHeader(http.StatusOK)
+			return
+		}
+
+		flusher, ok := w.(http.Flusher)
+		if !ok {
+			http.Error(w, "streaming unsupported", http.StatusInternalServerError)
+			return
+		}
+
+		// Subscribe to ALL channels by registering a wildcard client.
+		// The empty `channel` means fanout() needs special handling — we
+		// use a sentinel "*" so we don't accidentally collide with a real
+		// channel called "" elsewhere.
+		client := &sseClient{
+			channel: "*",
+			chain:   strings.TrimSpace(r.URL.Query().Get("chain")),
+			events:  make(chan []byte, 128),
+			done:    make(chan struct{}),
+		}
+		h.sse.attach(client)
+		defer h.sse.detach(client)
+
+		writeSSE(w, flusher, "CONNECT", []byte(`{}`))
+
+		keepAlive := time.NewTicker(30 * time.Second)
+		defer keepAlive.Stop()
+
+		ctx := r.Context()
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			case <-client.done:
+				return
+			case <-keepAlive.C:
+				if _, err := w.Write([]byte(": ping\n\n")); err != nil {
+					return
+				}
+				flusher.Flush()
+			case msg := <-client.events:
+				if _, err := w.Write(msg); err != nil {
+					return
+				}
+				flusher.Flush()
+			}
+		}
+	}
 }
