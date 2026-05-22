@@ -95,6 +95,11 @@ func main() {
 	registry := NewChainRegistry()
 	supervisor := NewChainSupervisor(cfg.DataDir)
 	registry.AttachSupervisor(supervisor)
+	// Bridge indexer block events into the realtime hub so WebSocket +
+	// SSE subscribers see new blocks as they're ingested. Must happen
+	// before any chain starts indexing — runChain installs the
+	// Subscriber.OnBroadcast callback off the hub set here.
+	supervisor.AttachRealtime(registry.hub)
 
 	for _, c := range cfg.Chains {
 		c.Source = "config"
