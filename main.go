@@ -141,6 +141,28 @@ func main() {
 		json.NewEncoder(w).Encode(registry.hub.Stats())
 	})
 
+	// SSE endpoints at the URLs the bundled SPA opens EventSource on.
+	// See realtime_sse.go for the channel mapping + the back-story on
+	// why each path needs its own handler. Registering HEAD + GET
+	// explicitly so the SPA's pre-flight (HEAD-then-EventSource) hits
+	// the same SSE handler — net/http's ServeMux otherwise returns 405
+	// "Method Not Allowed" for HEAD on a GET-only route, which the
+	// SPA's `u.ok` check would reject and disable the channel.
+	for path, channel := range map[string]string{
+		"/blocks":          "blocks",
+		"/transactions":    "transactions",
+		"/token-transfers": "token_transfers",
+		"/internal-txs":    "internal_transactions",
+		"/tokens":          "tokens",
+		"/gas-tracker":     "gas_tracker",
+		"/validators":      "validators",
+		"/stats":           "stats",
+	} {
+		h := registry.hub.HandleSSE(channel)
+		mux.HandleFunc("GET "+path, h)
+		mux.HandleFunc("HEAD "+path, h)
+	}
+
 	supervisor.MountRoutes(mux)
 	frontend.Mount(mux)
 
