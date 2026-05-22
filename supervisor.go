@@ -355,6 +355,20 @@ func (s *ChainSupervisor) runSubgraph(ctx context.Context, cfg ChainConfig, sg S
 
 // dispatchIndexer routes /v1/indexer/{slug}/* and /v1/indexer/* (default
 // chain) to the per-chain handler installed by mountIndexerAPI.
+//
+// Edge case the older code got wrong: when the first path segment matches
+// the slug regex but is NOT a registered chain (e.g. `main-page` in
+// `/v1/indexer/main-page/blocks`), splitSlug peels it off as a "slug" and
+// the dispatcher then forwarded only the REMAINING segments to the
+// default chain. That turned `/v1/indexer/main-page/blocks` into
+// `/v1/indexer/evm/blocks` server-side — a completely different endpoint
+// with a different response shape (paginated envelope vs. raw array). The
+// SPA's `?.slice(0,8)` on the home page's Latest Blocks widget tripped
+// over the envelope and threw "o.slice is not a function".
+//
+// Fix: when the parsed slug isn't a real chain, re-join it with the rest
+// before delegating, so the unrecognized segment is preserved as part of
+// the path under the default chain.
 func (s *ChainSupervisor) dispatchIndexer(w http.ResponseWriter, r *http.Request) {
 	slug, rest, ok := splitSlug(r.URL.Path, "/v1/indexer/")
 	if !ok {
@@ -365,7 +379,11 @@ func (s *ChainSupervisor) dispatchIndexer(w http.ResponseWriter, r *http.Request
 		h.(http.Handler).ServeHTTP(w, r)
 		return
 	}
-	s.serveDefault(w, r, rest)
+	fullTail := slug
+	if rest != "" {
+		fullTail = slug + "/" + rest
+	}
+	s.serveDefault(w, r, fullTail)
 }
 
 // serveDefault forwards an unprefixed /v1/indexer/* request to the default
