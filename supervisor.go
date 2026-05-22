@@ -36,6 +36,12 @@ type ChainSupervisor struct {
 	indexerRoutes sync.Map // map[slug]http.Handler
 	graphRoutes   sync.Map // map[slug + "/" + subgraph]http.Handler
 	defaultSlug   string   // serves /v1/indexer/* (no slug prefix)
+
+	// realtimeHub is the explorer's RealtimeHub. When set (via
+	// AttachRealtime), the supervisor wires each per-chain EVM indexer's
+	// Subscriber.OnBroadcast callback so block events flow into the hub
+	// → out to WebSocket + SSE subscribers. Nil = no live broadcast.
+	realtimeHub *RealtimeHub
 }
 
 type chainState struct {
@@ -50,6 +56,14 @@ func NewChainSupervisor(dataDir string) *ChainSupervisor {
 		dataDir: dataDir,
 		state:   make(map[string]*chainState),
 	}
+}
+
+// AttachRealtime wires per-chain block events into the explorer's
+// RealtimeHub. Called once from main.go after both the supervisor and
+// the registry's hub exist. Subsequent chain spawns (runChain below)
+// install the Subscriber.OnBroadcast callback automatically.
+func (s *ChainSupervisor) AttachRealtime(h *RealtimeHub) {
+	s.realtimeHub = h
 }
 
 // MountRoutes installs the /v1/indexer and /v1/graph dispatchers on mux. The
@@ -188,6 +202,19 @@ func (s *ChainSupervisor) runChain(ctx context.Context, cfg ChainConfig) {
 		if err != nil {
 			log.Printf("[%s] evm indexer: %v", cfg.Slug, err)
 			return
+		}
+		// Live broadcast bridge — when the supervisor has been given a
+		// RealtimeHub (see AttachRealtime), every block the indexer
+		// commits is re-published into the hub on the chain's slug. The
+		// hub then fans out to WebSocket and SSE subscribers (see
+		// realtime.go + realtime_sse.go). slug captured by value so the
+		// closure doesn't see a mutated `cfg` if the supervisor loops.
+		if s.realtimeHub != nil && idx.Subscriber() != nil {
+			slug := cfg.Slug
+			hub := s.realtimeHub
+			idx.Subscriber().OnBroadcast = func(eventType string, data any) {
+				hub.Broadcast(eventType, slug, data)
+			}
 		}
 		if err := idx.Init(ctx); err != nil {
 			log.Printf("[%s] evm init: %v", cfg.Slug, err)
