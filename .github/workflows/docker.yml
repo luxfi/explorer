@@ -9,17 +9,17 @@ permissions:
   packages: write
   id-token: write
 
-# Multi-arch on luxfi org's native amd64 ARC runner pool; arm64 via QEMU
-# (matches lux/graph + lux/indexer docker.yml). Mac devs run native arm64
-# under OrbStack — zero Rosetta is allowed. Semver tags only.
+# amd64-only on luxfi's native ARC pool — the SPA build (Next.js + 8GB
+# heap) + Go cgo-sqlite Docker build under QEMU arm64 emulation pushes
+# build time from ~5 min to ~2 hours. Cluster runners are amd64; Mac
+# devs use OrbStack which has its own arm64 base image story. arm64
+# rebuilds can come back via a separate matrix entry on a native
+# arm64 runner — not via QEMU.
 jobs:
   docker:
     runs-on: lux-build
     steps:
       - uses: actions/checkout@v4
-      - uses: docker/setup-qemu-action@v3
-        with:
-          platforms: linux/arm64
       - uses: docker/setup-buildx-action@v3
         with:
           driver: docker-container
@@ -41,7 +41,7 @@ jobs:
       - uses: docker/build-push-action@v6
         with:
           context: .
-          platforms: linux/amd64,linux/arm64
+          platforms: linux/amd64
           labels: ${{ steps.meta.outputs.labels }}
           tags: ${{ steps.meta.outputs.tags }}
           cache-from: type=gha,scope=explorer
