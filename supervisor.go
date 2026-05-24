@@ -198,6 +198,7 @@ func (s *ChainSupervisor) runChain(ctx context.Context, cfg ChainConfig) {
 			RPCEndpoint:  cfg.RPC,
 			HTTPPort:     0,
 			PollInterval: poll,
+			StartBlock:   cfg.Indexer.StartBlock,
 		}, store)
 		if err != nil {
 			log.Printf("[%s] evm indexer: %v", cfg.Slug, err)
