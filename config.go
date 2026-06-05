@@ -12,6 +12,7 @@ import (
 type Config struct {
 	DataDir      string        `yaml:"data_dir"`
 	HTTPAddr     string        `yaml:"http_addr"`
+	StaticDir    string        `yaml:"static_dir"` // overlay dir for SPA; empty = embedded only
 	BrandDefault Brand         `yaml:"brand_default"`
 	Networks     []Network     `yaml:"networks"`
 	Chains       []ChainConfig `yaml:"chains"`
