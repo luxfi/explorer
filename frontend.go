@@ -229,13 +229,34 @@ func (f *Frontend) brandForHost(host string) map[string]any {
 
 // brandStruct returns the Brand for a request host: a chain whose name or
 // slug matches the hostname wins; otherwise the global default.
+//
+// Matches any of these hostname shapes, in order of specificity:
+//   - "{slug}"                             — bare slug (curl localhost)
+//   - "{slug}.tld..."                      — {slug}.lux.network, {slug}.hanzo.ai
+//   - "explore-{slug}.tld..."              — explore-hanzo.lux.network
+//   - "api-explore-{slug}.tld..."          — api-explore-hanzo.lux.network
+//   - "explore.{slug}.tld..."              — explore.hanzo.ai, explore.zoo.ngo
+//   - "api-explore.{slug}.tld..."          — api-explore.hanzo.ai
+//   - "explore-{slug}-{env}.tld..."        — explore-hanzo-test.lux.network
+//   - "api-explore-{slug}-{env}.tld..."    — api-explore-hanzo-dev.lux.network
+//
+// Per-chain Brand wins over BrandDefault; first match wins on ambiguous
+// hosts.
 func (f *Frontend) brandStruct(host string) Brand {
 	host = strings.ToLower(strings.SplitN(host, ":", 2)[0])
 	for _, c := range f.cfg.Chains {
 		if c.Brand == nil {
 			continue
 		}
-		if strings.HasPrefix(host, c.Slug+".") || host == c.Slug {
+		slug := c.Slug
+		if host == slug ||
+			strings.HasPrefix(host, slug+".") ||
+			strings.HasPrefix(host, "explore-"+slug+".") ||
+			strings.HasPrefix(host, "explore-"+slug+"-") ||
+			strings.HasPrefix(host, "api-explore-"+slug+".") ||
+			strings.HasPrefix(host, "api-explore-"+slug+"-") ||
+			strings.HasPrefix(host, "explore."+slug+".") ||
+			strings.HasPrefix(host, "api-explore."+slug+".") {
 			return *c.Brand
 		}
 	}

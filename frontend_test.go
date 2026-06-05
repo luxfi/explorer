@@ -118,3 +118,64 @@ func TestFrontendEnvStaticDir(t *testing.T) {
 		t.Fatalf("expected env-overlay index, got %q", string(f.index))
 	}
 }
+
+// TestBrandStructHostMatching covers every hostname shape the unified
+// explorer's IngressRoutes hand it: the per-chain brand must win over
+// BrandDefault for both UI hosts (explore-{slug}, explore.{slug}.tld)
+// and API hosts (api-explore-{slug}). The matcher must NOT bleed across
+// chains — a hanzo host must not pick zoo's brand or vice versa.
+func TestBrandStructHostMatching(t *testing.T) {
+	hanzoBrand := Brand{Name: "Hanzo", Coin: "AI", AccentColor: "#0b1220"}
+	zooBrand := Brand{Name: "Zoo", Coin: "ZOO", AccentColor: "#7c3aed"}
+	cfg := Config{
+		BrandDefault: Brand{Name: "Lux Explorer"},
+		Chains: []ChainConfig{
+			{Slug: "cchain", Brand: &Brand{Name: "Lux C-Chain", Coin: "LUX"}},
+			{Slug: "hanzo", Brand: &hanzoBrand},
+			{Slug: "zoo", Brand: &zooBrand},
+		},
+	}
+	f, err := NewFrontend(cfg, NewChainRegistry())
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	cases := []struct {
+		host string
+		want string
+	}{
+		// Bare slug + slug-prefix shape.
+		{"hanzo", "Hanzo"},
+		{"hanzo.lux.network", "Hanzo"},
+		// explore-{slug} prefix shape (lux.network UI hosts).
+		{"explore-hanzo.lux.network", "Hanzo"},
+		{"explore-hanzo-test.lux.network", "Hanzo"},
+		{"explore-hanzo-dev.lux.network", "Hanzo"},
+		{"explore-zoo.lux.network", "Zoo"},
+		// api-explore-{slug} prefix shape (lux.network API hosts).
+		{"api-explore-hanzo.lux.network", "Hanzo"},
+		{"api-explore-hanzo-test.lux.network", "Hanzo"},
+		{"api-explore-zoo.lux.network", "Zoo"},
+		// explore.{slug}.tld shape (brand-owned domains).
+		{"explore.hanzo.ai", "Hanzo"},
+		{"explore.hanzo.network", "Hanzo"},
+		{"explore.zoo.network", "Zoo"},
+		{"explore.zoo.ngo", "Zoo"},
+		{"api-explore.hanzo.ai", "Hanzo"},
+		{"api-explore.zoo.ngo", "Zoo"},
+		// Mismatched hosts fall back to BrandDefault.
+		{"explore.lux.network", "Lux Explorer"},
+		{"unknown.example.com", "Lux Explorer"},
+		// Cross-contamination guard: explore-spcfoo must NOT match spc.
+		{"explore-spcfoo.lux.network", "Lux Explorer"},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.host, func(t *testing.T) {
+			got := f.brandStruct(tc.host).Name
+			if got != tc.want {
+				t.Fatalf("host=%q: got brand=%q, want %q", tc.host, got, tc.want)
+			}
+		})
+	}
+}
