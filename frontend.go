@@ -23,11 +23,19 @@ var staticFS embed.FS
 // Frontend serves the embedded SPA, runtime config (/envs.js), and per-host
 // brand assets (/icon.svg, /logo.svg). Brand assets read from disk on every
 // request so a deploy can swap them without rebuilding the binary.
+//
+// SPA override: if cfg.StaticDir (or $EXPLORER_STATIC_DIR) points at an
+// existing directory, file lookups prefer the on-disk copy over the
+// embedded FS. This lets a ConfigMap-mounted SPA replace the embedded
+// 60-byte placeholder without a binary rebuild — useful when the
+// upstream `explore` Next.js app hasn't shipped a static export yet but
+// we want a richer in-cluster default than `<div id="root"></div>`.
 type Frontend struct {
 	cfg      Config
 	registry *ChainRegistry
-	root     fs.FS
-	index    []byte
+	root     fs.FS    // embedded SPA (always present)
+	overlay  fs.FS    // disk overlay (nil if cfg.StaticDir not set)
+	index    []byte   // resolved index.html (overlay > embedded > builtin)
 }
 
 // NewFrontend returns a frontend handler bound to a config and chain registry.
@@ -36,11 +44,38 @@ func NewFrontend(cfg Config, r *ChainRegistry) (*Frontend, error) {
 	if err != nil {
 		return nil, err
 	}
-	idx, err := fs.ReadFile(root, "index.html")
-	if err != nil {
-		idx = []byte("<!doctype html><title>Explorer</title>")
+	f := &Frontend{cfg: cfg, registry: r, root: root}
+
+	dir := cfg.StaticDir
+	if dir == "" {
+		dir = os.Getenv("EXPLORER_STATIC_DIR")
 	}
-	return &Frontend{cfg: cfg, registry: r, root: root, index: idx}, nil
+	if dir != "" {
+		if st, err := os.Stat(dir); err == nil && st.IsDir() {
+			f.overlay = os.DirFS(dir)
+		}
+	}
+
+	if data := f.readStatic("index.html"); data != nil {
+		f.index = data
+	} else {
+		f.index = []byte("<!doctype html><title>Explorer</title>")
+	}
+	return f, nil
+}
+
+// readStatic returns the bytes for `name` from the overlay if present,
+// otherwise from the embedded FS. Returns nil if neither has the file.
+func (f *Frontend) readStatic(name string) []byte {
+	if f.overlay != nil {
+		if data, err := fs.ReadFile(f.overlay, name); err == nil {
+			return data
+		}
+	}
+	if data, err := fs.ReadFile(f.root, name); err == nil {
+		return data
+	}
+	return nil
 }
 
 // Mount installs / (SPA), /envs.js, /icon.svg, /logo.svg on mux.
@@ -82,6 +117,18 @@ func (f *Frontend) handleSPA(w http.ResponseWriter, r *http.Request) {
 		}
 		f.writeIndex(w)
 		return
+	}
+	// Overlay wins if it has the file (any non-directory entry); falls
+	// back to embedded; falls back to index.html (SPA-routing).
+	if f.overlay != nil {
+		if file, err := f.overlay.Open(p); err == nil {
+			st, statErr := file.Stat()
+			file.Close()
+			if statErr == nil && !st.IsDir() {
+				http.ServeFileFS(w, r, f.overlay, p)
+				return
+			}
+		}
 	}
 	file, err := f.root.Open(p)
 	if err != nil {
@@ -147,8 +194,8 @@ func (f *Frontend) handleLogo(w http.ResponseWriter, r *http.Request) {
 }
 
 // serveBrandFile resolves the file path from the matched brand (per-chain or
-// default) and sends it. Falls back to the embedded SPA's named asset if no
-// disk override is configured.
+// default) and sends it. Falls back to the on-disk overlay (if configured)
+// then the embedded SPA's named asset.
 func (f *Frontend) serveBrandFile(w http.ResponseWriter, r *http.Request, pick func(Brand) string, fallback string) {
 	brand := f.brandStruct(r.Host)
 	if path := pick(brand); path != "" {
@@ -159,7 +206,7 @@ func (f *Frontend) serveBrandFile(w http.ResponseWriter, r *http.Request, pick f
 			return
 		}
 	}
-	if data, err := fs.ReadFile(f.root, fallback); err == nil {
+	if data := f.readStatic(fallback); data != nil {
 		w.Header().Set("Content-Type", contentTypeFor(fallback))
 		w.Header().Set("Cache-Control", "public, max-age=300")
 		w.Write(data)
