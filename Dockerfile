@@ -13,12 +13,6 @@ ARG GRAPH_REF=main
 
 # ---- Stage 1: build the SPA ----
 #
-<<<<<<< Updated upstream
-# Frontend chain knobs are build-time, not runtime: the Blockscout-fork
-# SPA reads NEXT_PUBLIC_* at `pnpm build` and bakes them into the
-# emitted JS. Default to the Liquid devnet shape; downstream rebuilds
-# override via --build-arg NETWORK_ID=… (etc.) for testnet/mainnet.
-=======
 # luxfi/explore is a Next.js `output: 'standalone'` SSR app, not a static
 # export — so `pnpm build` does NOT produce /app/out/. The unified
 # explorer needs static assets to embed via go:embed; until upstream
@@ -27,7 +21,11 @@ ARG GRAPH_REF=main
 # to render the chain list client-side. When upstream explore lands
 # static-export support, this stage gains `pnpm build && cp .next/static
 # /app/out/_next/static` and the shell can hydrate.
->>>>>>> Stashed changes
+#
+# Build-arg defaults shape the optional Next.js static export attempt
+# (only used if explore.git lands `output: 'export'` upstream). Real
+# branding comes from the runtime chains.yaml + brand assets mount on
+# the explorer Deployment — no rebuild needed to swap.
 FROM node:${NODE_VERSION}-alpine AS frontend
 ARG EXPLORE_REPO
 ARG EXPLORE_REF
