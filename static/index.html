@@ -37,7 +37,8 @@
 <header>
   <img id="logo" src="/logo.svg" alt="">
   <h1 id="brand">Explorer</h1>
-  <select id="chain"></select>
+  <select id="network" title="Network"></select>
+  <select id="chain" title="Chain"></select>
   <span class="chip" id="chip"></span>
 </header>
 <main>
@@ -50,6 +51,8 @@
   const ENV = window.ENV || {};
   const BRAND = ENV.VITE_BRAND || {};
   const CHAINS = (ENV.VITE_CHAINS || []).filter(c => c.type === 'evm' || !c.type);
+  const NETWORK_HOSTS = ENV.VITE_NETWORK_HOSTS || {};
+  const CURRENT_NETWORK = ENV.VITE_CURRENT_NETWORK || '';
   const PATH_BASE = '/v1/indexer';
   const $ = s => document.querySelector(s);
   const fmt = n => (n == null || n === '') ? '–' : Number(n).toLocaleString();
@@ -76,6 +79,29 @@
   if (BRAND.name) $('#brand').textContent = BRAND.name;
   if (BRAND.iconUrl) $('#logo').src = BRAND.iconUrl;
   if (BRAND.accentColor) document.documentElement.style.setProperty('--ac', BRAND.accentColor);
+
+  // Network picker — hidden unless we have at least two siblings.
+  const netSel = $('#network');
+  const labels = Object.keys(NETWORK_HOSTS);
+  if (labels.length >= 2 && CURRENT_NETWORK) {
+    labels.sort();
+    labels.forEach(label => {
+      const o = document.createElement('option');
+      o.value = label;
+      o.textContent = label.charAt(0).toUpperCase() + label.slice(1);
+      if (label === CURRENT_NETWORK) o.selected = true;
+      netSel.appendChild(o);
+    });
+    netSel.onchange = () => {
+      const target = NETWORK_HOSTS[netSel.value];
+      if (!target || target === location.host) return;
+      // Preserve protocol + path + hash so the user lands on the same
+      // chain/page on the sibling network.
+      location.href = location.protocol + '//' + target + location.pathname + location.hash;
+    };
+  } else {
+    netSel.style.display = 'none';
+  }
 
   // Chain picker.
   const sel = $('#chain');
