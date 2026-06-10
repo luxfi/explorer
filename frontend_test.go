@@ -163,11 +163,23 @@ func TestBrandStructHostMatching(t *testing.T) {
 		{"explore.zoo.ngo", "Zoo"},
 		{"api-explore.hanzo.ai", "Hanzo"},
 		{"api-explore.zoo.ngo", "Zoo"},
+		// explorer.{slug}.tld shape (alias of explore.* for brand-owned domains).
+		{"explorer.zoo.network", "Zoo"},
+		{"explorer.hanzo.ai", "Hanzo"},
+		// {slug}-{env}.tld shape — brand-owned testnet/devnet domains.
+		// explorer.zoo-test.network is the primary case this fixes.
+		{"explorer.zoo-test.network", "Zoo"},
+		{"explore.zoo-test.network", "Zoo"},
+		{"explorer.hanzo-test.network", "Hanzo"},
+		{"api-explore.zoo-test.network", "Zoo"},
 		// Mismatched hosts fall back to BrandDefault.
 		{"explore.lux.network", "Lux Explorer"},
 		{"unknown.example.com", "Lux Explorer"},
 		// Cross-contamination guard: explore-spcfoo must NOT match spc.
 		{"explore-spcfoo.lux.network", "Lux Explorer"},
+		// Cross-contamination guard: zoofoo must NOT match zoo.
+		{"explore.zoofoo.network", "Lux Explorer"},
+		{"explorer.zoofoo.network", "Lux Explorer"},
 	}
 
 	for _, tc := range cases {
@@ -175,6 +187,53 @@ func TestBrandStructHostMatching(t *testing.T) {
 			got := f.brandStruct(tc.host).Name
 			if got != tc.want {
 				t.Fatalf("host=%q: got brand=%q, want %q", tc.host, got, tc.want)
+			}
+		})
+	}
+}
+
+// TestChainSlugForHost covers the host→default-chain promotion that
+// handleEnvs uses to set the SPA's initial chain selection. Hosts that
+// pin a chain (explore.zoo.network, explorer.zoo-test.network) must
+// return the slug; generic hosts (explore.lux.network) must return "".
+func TestChainSlugForHost(t *testing.T) {
+	zooBrand := Brand{Name: "Zoo"}
+	hanzoBrand := Brand{Name: "Hanzo"}
+	cfg := Config{
+		BrandDefault: Brand{Name: "Lux Explorer"},
+		Chains: []ChainConfig{
+			{Slug: "cchain", Brand: &Brand{Name: "Lux C-Chain"}},
+			{Slug: "hanzo", Brand: &hanzoBrand},
+			{Slug: "zoo", Brand: &zooBrand},
+		},
+	}
+	f, err := NewFrontend(cfg, NewChainRegistry())
+	if err != nil {
+		t.Fatal(err)
+	}
+	cases := []struct {
+		host string
+		want string
+	}{
+		{"explore.zoo.network", "zoo"},
+		{"explore.zoo.ngo", "zoo"},
+		{"explorer.zoo.network", "zoo"},
+		{"explorer.zoo-test.network", "zoo"},
+		{"explore.zoo-test.network", "zoo"},
+		{"explore-zoo.lux.network", "zoo"},
+		{"explore-zoo-test.lux.network", "zoo"},
+		{"explore.hanzo.ai", "hanzo"},
+		{"explorer.hanzo-test.network", "hanzo"},
+		// Generic / mismatched hosts: no slug.
+		{"explore.lux.network", ""},
+		{"unknown.example.com", ""},
+		{"explore.zoofoo.network", ""},
+	}
+	for _, tc := range cases {
+		t.Run(tc.host, func(t *testing.T) {
+			got := f.chainSlugForHost(tc.host)
+			if got != tc.want {
+				t.Fatalf("host=%q: got slug=%q, want %q", tc.host, got, tc.want)
 			}
 		})
 	}

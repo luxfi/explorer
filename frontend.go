@@ -164,7 +164,21 @@ func (f *Frontend) writeIndex(w http.ResponseWriter) {
 // different brand + chain list.
 func (f *Frontend) handleEnvs(w http.ResponseWriter, r *http.Request) {
 	hostBrand := f.brandForHost(r.Host)
+	hostSlug := f.chainSlugForHost(r.Host)
 	chains := f.chainListJSON()
+	// When the host pins a specific chain (e.g. explore.zoo.network →
+	// zoo, explorer.zoo-test.network → zoo), promote that chain to
+	// default and demote any other config-level default. The SPA's chain
+	// switcher honours the "default" flag.
+	if hostSlug != "" {
+		for i := range chains {
+			if chains[i]["slug"] == hostSlug {
+				chains[i]["default"] = true
+			} else {
+				chains[i]["default"] = false
+			}
+		}
+	}
 
 	env := map[string]any{
 		"VITE_CHAINS":   chains,
@@ -230,37 +244,86 @@ func (f *Frontend) brandForHost(host string) map[string]any {
 // brandStruct returns the Brand for a request host: a chain whose name or
 // slug matches the hostname wins; otherwise the global default.
 //
-// Matches any of these hostname shapes, in order of specificity:
+// See hostMatchesSlug for the list of supported hostname shapes.
+func (f *Frontend) brandStruct(host string) Brand {
+	if c, ok := f.matchChain(host); ok && c.Brand != nil {
+		return *c.Brand
+	}
+	return f.cfg.BrandDefault
+}
+
+// chainSlugForHost returns the slug of the chain pinned by the request host,
+// or "" if the host does not name a chain. Used by handleEnvs to promote a
+// per-host chain to the SPA's default selection.
+func (f *Frontend) chainSlugForHost(host string) string {
+	if c, ok := f.matchChain(host); ok {
+		return c.Slug
+	}
+	return ""
+}
+
+// matchChain finds the first configured chain whose slug appears in the
+// request host. Matches these hostname shapes, in order of specificity:
 //   - "{slug}"                             — bare slug (curl localhost)
 //   - "{slug}.tld..."                      — {slug}.lux.network, {slug}.hanzo.ai
 //   - "explore-{slug}.tld..."              — explore-hanzo.lux.network
+//   - "explorer-{slug}.tld..."             — explorer-hanzo.lux.network
 //   - "api-explore-{slug}.tld..."          — api-explore-hanzo.lux.network
 //   - "explore.{slug}.tld..."              — explore.hanzo.ai, explore.zoo.ngo
+//   - "explorer.{slug}.tld..."             — explorer.hanzo.ai, explorer.zoo.network
 //   - "api-explore.{slug}.tld..."          — api-explore.hanzo.ai
 //   - "explore-{slug}-{env}.tld..."        — explore-hanzo-test.lux.network
+//   - "explorer-{slug}-{env}.tld..."       — explorer-hanzo-test.lux.network
 //   - "api-explore-{slug}-{env}.tld..."    — api-explore-hanzo-dev.lux.network
+//   - "explore.{slug}-{env}.tld..."        — explore.zoo-test.network
+//   - "explorer.{slug}-{env}.tld..."       — explorer.zoo-test.network
+//   - "api-explore.{slug}-{env}.tld..."    — api-explore.zoo-test.network
 //
-// Per-chain Brand wins over BrandDefault; first match wins on ambiguous
-// hosts.
-func (f *Frontend) brandStruct(host string) Brand {
+// First chain match wins on ambiguous hosts.
+func (f *Frontend) matchChain(host string) (ChainConfig, bool) {
 	host = strings.ToLower(strings.SplitN(host, ":", 2)[0])
 	for _, c := range f.cfg.Chains {
-		if c.Brand == nil {
-			continue
-		}
-		slug := c.Slug
-		if host == slug ||
-			strings.HasPrefix(host, slug+".") ||
-			strings.HasPrefix(host, "explore-"+slug+".") ||
-			strings.HasPrefix(host, "explore-"+slug+"-") ||
-			strings.HasPrefix(host, "api-explore-"+slug+".") ||
-			strings.HasPrefix(host, "api-explore-"+slug+"-") ||
-			strings.HasPrefix(host, "explore."+slug+".") ||
-			strings.HasPrefix(host, "api-explore."+slug+".") {
-			return *c.Brand
+		if hostMatchesSlug(host, c.Slug) {
+			return c, true
 		}
 	}
-	return f.cfg.BrandDefault
+	return ChainConfig{}, false
+}
+
+// hostMatchesSlug is the pure string predicate for chain↔host matching.
+// Kept separate from matchChain so unit tests can cover it directly.
+func hostMatchesSlug(host, slug string) bool {
+	if slug == "" {
+		return false
+	}
+	if host == slug {
+		return true
+	}
+	// Direct slug-as-subdomain: zoo.lux.network, hanzo.ai.
+	if strings.HasPrefix(host, slug+".") || strings.HasPrefix(host, slug+"-") {
+		return true
+	}
+	// Brand-owned domains: explore.zoo.network, explorer.zoo-test.network,
+	// api-explore.zoo.ngo, etc. Each "explore"/"explorer" prefix combines
+	// with "." or "-" as the slug separator.
+	prefixes := []string{
+		"explore-", "explorer-",
+		"api-explore-", "api-explorer-",
+		"explore.", "explorer.",
+		"api-explore.", "api-explorer.",
+	}
+	for _, p := range prefixes {
+		// {prefix}{slug}.tld  — e.g. explore.zoo.network, explore-zoo.lux.network
+		if strings.HasPrefix(host, p+slug+".") {
+			return true
+		}
+		// {prefix}{slug}-{env}.tld — e.g. explore-zoo-test.lux.network,
+		// explorer.zoo-test.network
+		if strings.HasPrefix(host, p+slug+"-") {
+			return true
+		}
+	}
+	return false
 }
 
 // chainListJSON returns a SPA-friendly chain list from the live registry,
