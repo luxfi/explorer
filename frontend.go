@@ -180,10 +180,13 @@ func (f *Frontend) handleEnvs(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
+	current, peers := f.networksForHost(r.Host)
 	env := map[string]any{
-		"VITE_CHAINS":   chains,
-		"VITE_NETWORKS": f.cfg.Networks,
-		"VITE_BRAND":    hostBrand,
+		"VITE_CHAINS":          chains,
+		"VITE_NETWORKS":        f.cfg.Networks,
+		"VITE_BRAND":           hostBrand,
+		"VITE_CURRENT_NETWORK": current,
+		"VITE_NETWORK_HOSTS":   peers,
 	}
 	body, _ := json.Marshal(env)
 
@@ -324,6 +327,172 @@ func hostMatchesSlug(host, slug string) bool {
 		}
 	}
 	return false
+}
+
+// networksForHost returns (current network label, sibling host map). The
+// SPA renders a "Network: mainnet ▾" dropdown — when the user picks
+// another label, the SPA redirects to the corresponding host. Hosts are
+// derived purely from the request host: explore.zoo.network (mainnet)
+// has sibling explorer.zoo-test.network (testnet); explore.lux.network
+// has sibling explorer.lux-test.network; and the reverse.
+//
+// Host shape rules:
+//   - mainnet: prefix is "explore.", brand domain is "<brand>.<tld>"
+//     (e.g. zoo.network, lux.network, hanzo.ai). Sibling is
+//     "explorer.<brand>-test.network".
+//   - testnet: prefix is "explorer.", brand domain is "<brand>-test.network".
+//     Sibling is "explore.<brand>.network" (or .ai / .ngo per brand
+//     when known; we default to .network because all the actual
+//     deployed testnet hosts are *.network).
+//   - lux.network (no brand prefix, generic explore.lux.network) is
+//     special-cased: mainnet=explore.lux.network, testnet=explorer.lux-test.network.
+//
+// If we can't classify the host (admin tooling on localhost, internal
+// service-mesh hostnames), we return ("", nil) and the SPA omits the
+// dropdown.
+func (f *Frontend) networksForHost(host string) (string, map[string]string) {
+	host = strings.ToLower(strings.SplitN(host, ":", 2)[0])
+
+	// Find the brand stem and current env from the host. The two
+	// shapes we support are "{prefix}.{brand}.{tld}" (mainnet) and
+	// "{prefix}.{brand}-{env}.{tld}" (non-mainnet).
+	brand, env, dotted, ok := parseBrandEnv(host)
+	if !ok {
+		return "", nil
+	}
+
+	// All deployed testnet/devnet hosts are *.network. Mainnet
+	// brand hosts vary: zoo.network, lux.network, hanzo.ai, hanzo.network,
+	// zoo.ngo, etc. For the round-trip from testnet back to mainnet
+	// we need to know which mainnet TLD the brand uses. When the user
+	// is already on a brand-owned domain (explore.{brand}.{tld}),
+	// preserve that TLD so the mainnet option is idempotent. When the
+	// user is on the lux.network-prefix shape (explore-{brand}.lux.network)
+	// or any non-brand-owned shape, default to ".network" — every brand
+	// we ship has an X.network mainnet alias.
+	mainnetTLD := ".network"
+	if env == "" && dotted {
+		if dot := strings.Index(host, brand+"."); dot >= 0 {
+			mainnetTLD = host[dot+len(brand):]
+		}
+	}
+
+	mainnetHost := "explore." + brand + mainnetTLD
+	testnetHost := "explorer." + brand + "-test.network"
+
+	peers := map[string]string{
+		"mainnet": mainnetHost,
+		"testnet": testnetHost,
+	}
+	switch env {
+	case "":
+		return "mainnet", peers
+	case "test", "testnet":
+		return "testnet", peers
+	case "dev", "devnet":
+		// Optional devnet entry; only surfaces when present.
+		peers["devnet"] = "explorer." + brand + "-dev.network"
+		return "devnet", peers
+	default:
+		return env, peers
+	}
+}
+
+// parseBrandEnv extracts the brand stem and env tag from a host. Recognizes:
+//
+//	explore.{brand}.{tld}                  → ({brand}, "", dotted=true)
+//	explorer.{brand}.{tld}                 → ({brand}, "", dotted=true)
+//	explore.{brand}-{env}.{tld}            → ({brand}, {env}, dotted=true)
+//	explorer.{brand}-{env}.{tld}           → ({brand}, {env}, dotted=true)
+//	explore-{brand}.lux.network            → ({brand}, "", dotted=false)
+//	explore-{brand}-{env}.lux.network      → ({brand}, {env}, dotted=false)
+//
+// Returns ok=false on hosts we can't classify (localhost, IPs, internal
+// service-mesh names like *.svc.cluster.local).
+//
+// `dotted` distinguishes brand-owned hosts (explore.zoo.network — TLD
+// belongs to the brand) from lux-prefix hosts (explore-zoo.lux.network —
+// brand is just a subdomain on lux.network) so the network switcher can
+// pick the right mainnet TLD for the sibling URL.
+func parseBrandEnv(host string) (brand, env string, dotted, ok bool) {
+	if host == "" || strings.HasSuffix(host, ".svc.cluster.local") || strings.HasSuffix(host, ".local") {
+		return "", "", false, false
+	}
+	stripPrefix := func(s, p string) (string, bool) {
+		if strings.HasPrefix(s, p) {
+			return s[len(p):], true
+		}
+		return s, false
+	}
+
+	// "explore.{brand}{maybe-env}.{tld}" / "explorer.{brand}{maybe-env}.{tld}"
+	for _, p := range []string{"explore.", "explorer.", "api-explore.", "api-explorer."} {
+		rest, matched := stripPrefix(host, p)
+		if !matched {
+			continue
+		}
+		dot := strings.Index(rest, ".")
+		if dot < 1 {
+			return "", "", false, false
+		}
+		stem := rest[:dot]
+		brand, env = splitBrandEnv(stem)
+		if !isValidBrand(brand) {
+			return "", "", false, false
+		}
+		return brand, env, true, true
+	}
+
+	// "explore-{brand}{maybe-env}.lux.network" / "explorer-{brand}{maybe-env}.lux.network"
+	for _, p := range []string{"explore-", "explorer-", "api-explore-", "api-explorer-"} {
+		rest, matched := stripPrefix(host, p)
+		if !matched {
+			continue
+		}
+		dot := strings.Index(rest, ".")
+		if dot < 1 {
+			return "", "", false, false
+		}
+		stem := rest[:dot]
+		brand, env = splitBrandEnv(stem)
+		if !isValidBrand(brand) {
+			return "", "", false, false
+		}
+		return brand, env, false, true
+	}
+
+	return "", "", false, false
+}
+
+// isValidBrand restricts brand stems to alphabetic (or digit-containing) tokens
+// at least 2 chars long. Rejects numeric-only stems (IP addresses), empty,
+// and stems beginning with a digit (so "10" from "10.0.0.1" never matches).
+func isValidBrand(s string) bool {
+	if len(s) < 2 {
+		return false
+	}
+	if s[0] < 'a' || s[0] > 'z' {
+		return false
+	}
+	for i := 0; i < len(s); i++ {
+		c := s[i]
+		if !(c >= 'a' && c <= 'z') && !(c >= '0' && c <= '9') {
+			return false
+		}
+	}
+	return true
+}
+
+// splitBrandEnv splits "zoo-test" into ("zoo", "test"); "zoo" stays as ("zoo", "").
+// Only recognises known env suffixes (test, testnet, dev, devnet, local) so
+// hyphenated brand names ("api-zoo-exchange") still parse as one stem.
+func splitBrandEnv(stem string) (brand, env string) {
+	for _, e := range []string{"-test", "-testnet", "-dev", "-devnet", "-local"} {
+		if strings.HasSuffix(stem, e) {
+			return strings.TrimSuffix(stem, e), strings.TrimPrefix(e, "-")
+		}
+	}
+	return stem, ""
 }
 
 // chainListJSON returns a SPA-friendly chain list from the live registry,
