@@ -51,8 +51,35 @@
   const ENV = window.ENV || {};
   const BRAND = ENV.VITE_BRAND || {};
   const CHAINS = (ENV.VITE_CHAINS || []).filter(c => c.type === 'evm' || !c.type);
-  const NETWORK_HOSTS = ENV.VITE_NETWORK_HOSTS || {};
-  const CURRENT_NETWORK = ENV.VITE_CURRENT_NETWORK || '';
+  // Network host derivation. Prefer server-supplied values (v1.2.20+ go
+  // binary fills VITE_CURRENT_NETWORK and VITE_NETWORK_HOSTS), fall back
+  // to client-side parsing so the network switcher still works on older
+  // images (v1.2.18) where /envs.js doesn't ship the fields.
+  const networkFromHost = (host) => {
+    host = (host || '').toLowerCase().split(':')[0];
+    if (!host || host === 'localhost' || /^[0-9.]+$/.test(host)) return null;
+    if (host.endsWith('.svc.cluster.local') || host.endsWith('.local')) return null;
+    const m = host.match(/^(explore|explorer|api-explore|api-explorer)([.-])([a-z][a-z0-9]+)(?:-(test|testnet|dev|devnet|local))?(\.[^.]+(?:\.[^.]+)*)$/);
+    if (!m) return null;
+    const [, , sep, brand, envTag, tail] = m;
+    const env = envTag || '';
+    // sep==='.' → brand-owned host (explore.zoo.network); preserve tail
+    // on mainnet. sep==='-' → lux.network-prefix host
+    // (explore-zoo.lux.network); force tail to .network on mainnet
+    // since brand-owned mainnet aliases are always *.network.
+    const mainnetTail = (sep === '.' && env === '') ? tail : '.network';
+    return {
+      current: env || 'mainnet',
+      hosts: {
+        mainnet: 'explore.' + brand + mainnetTail,
+        testnet: 'explorer.' + brand + '-test.network',
+      },
+    };
+  };
+  const fallback = networkFromHost(location.host) || {current:'',hosts:{}};
+  const NETWORK_HOSTS = ENV.VITE_NETWORK_HOSTS && Object.keys(ENV.VITE_NETWORK_HOSTS).length
+    ? ENV.VITE_NETWORK_HOSTS : fallback.hosts;
+  const CURRENT_NETWORK = ENV.VITE_CURRENT_NETWORK || fallback.current;
   const PATH_BASE = '/v1/indexer';
   const $ = s => document.querySelector(s);
   const fmt = n => (n == null || n === '') ? '–' : Number(n).toLocaleString();
