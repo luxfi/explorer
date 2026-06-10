@@ -29,9 +29,9 @@ ARG GRAPH_REF=main
 FROM node:${NODE_VERSION}-alpine AS frontend
 ARG EXPLORE_REPO
 ARG EXPLORE_REF
-ARG NETWORK_ID=8675312
-ARG NETWORK_NAME="regulated EVM L1"
-ARG NETWORK_CURRENCY_SYMBOL=
+ARG NETWORK_ID=96369
+ARG NETWORK_NAME="Lux Network"
+ARG NETWORK_CURRENCY_SYMBOL=LUX
 RUN apk add --no-cache git
 WORKDIR /app
 # Best-effort: clone explore and try to produce a static export. If
