@@ -13,29 +13,35 @@ import (
 	"sync"
 )
 
-// staticFS is the embedded SPA. The Dockerfile populates static/ from a
-// luxfi/explore build before the Go build runs; for local dev a placeholder
-// index.html is committed so go:embed always succeeds.
+// staticFS embeds named brand assets only — icon.svg and logo.svg
+// fallbacks. As of v1.3.0 the Go binary no longer serves the Blockscout
+// SPA; each brand's FE runs as its own per-(brand, env) Deployment
+// (ghcr.io/{org}/explore-{env}:vX.Y.Z) and the IngressRoute routes the
+// catch-all to that FE Service. The Go binary keeps /v1/* (indexer +
+// blockscout-compat APIs), /health, /envs.js, and the per-host brand
+// SVG endpoints — every other path returns 404.
 //
 //go:embed all:static
 var staticFS embed.FS
 
-// Frontend serves the embedded SPA, runtime config (/envs.js), and per-host
-// brand assets (/icon.svg, /logo.svg). Brand assets read from disk on every
-// request so a deploy can swap them without rebuilding the binary.
+// Frontend serves runtime config (/envs.js) and per-host brand assets
+// (/icon.svg, /logo.svg). Brand assets read from disk on every request so a
+// deploy can swap them without rebuilding the binary.
 //
-// SPA override: if cfg.StaticDir (or $EXPLORER_STATIC_DIR) points at an
-// existing directory, file lookups prefer the on-disk copy over the
-// embedded FS. This lets a ConfigMap-mounted SPA replace the embedded
-// 60-byte placeholder without a binary rebuild — useful when the
-// upstream `explore` Next.js app hasn't shipped a static export yet but
-// we want a richer in-cluster default than `<div id="root"></div>`.
+// Static directory override: if cfg.StaticDir (or $EXPLORER_STATIC_DIR)
+// points at an existing directory, brand-asset lookups prefer the on-disk
+// copy over the embedded FS. This lets a ConfigMap-mounted SVG bundle
+// override the in-binary defaults without rebuilding.
+//
+// SPA serving was removed in v1.3.0 — the catch-all `/` route is gone and
+// any path not explicitly registered returns 404. The per-brand
+// Blockscout FE Deployment (ghcr.io/{brand-org}/explore-{env}) owns the
+// SPA surface.
 type Frontend struct {
 	cfg      Config
 	registry *ChainRegistry
-	root     fs.FS    // embedded SPA (always present)
-	overlay  fs.FS    // disk overlay (nil if cfg.StaticDir not set)
-	index    []byte   // resolved index.html (overlay > embedded > builtin)
+	root     fs.FS // embedded brand-asset FS (always present)
+	overlay  fs.FS // disk overlay (nil if cfg.StaticDir not set)
 }
 
 // NewFrontend returns a frontend handler bound to a config and chain registry.
@@ -55,12 +61,6 @@ func NewFrontend(cfg Config, r *ChainRegistry) (*Frontend, error) {
 			f.overlay = os.DirFS(dir)
 		}
 	}
-
-	if data := f.readStatic("index.html"); data != nil {
-		f.index = data
-	} else {
-		f.index = []byte("<!doctype html><title>Explorer</title>")
-	}
 	return f, nil
 }
 
@@ -78,84 +78,69 @@ func (f *Frontend) readStatic(name string) []byte {
 	return nil
 }
 
-// Mount installs / (SPA), /envs.js, /icon.svg, /logo.svg on mux.
+// Mount installs the data-layer endpoints — /envs.js, /icon.svg,
+// /logo.svg, plus any extra brand SVGs present in the overlay (e.g.
+// /icon-zoo.svg, /logo-lux.svg). No catch-all SPA route: any other path
+// returns 404 so the IngressRoute layer routes it to the per-brand
+// Blockscout FE Deployment.
 func (f *Frontend) Mount(mux *http.ServeMux) {
 	mux.HandleFunc("GET /envs.js", f.handleEnvs)
 	mux.HandleFunc("GET /icon.svg", f.handleIcon)
 	mux.HandleFunc("GET /logo.svg", f.handleLogo)
-	mux.HandleFunc("/", f.handleSPA)
+	for _, name := range f.brandAssetNames() {
+		mux.HandleFunc("GET /"+name, f.handleNamedBrandAsset(name))
+	}
 }
 
-// handleSPA serves embedded static assets and falls back to index.html for
-// any path the SPA owns (client-side routing).
-//
-// HEAD-method note: the bundled SPA opens EventSource (Server-Sent Events)
-// channels for live block / token / tx streams and pre-flights each URL
-// with a HEAD request:
-//
-//	fetch(url, {method: 'HEAD'}).then(r => r.ok ? openEventSource() : disable());
-//
-// If we serve a 200 (because of the SPA fallback to index.html), the SPA
-// proceeds to open the EventSource — which then immediately aborts because
-// the response body is text/html, not text/event-stream. Browser logs
-// "EventSource's response has a MIME type ('text/html') that is not
-// 'text/event-stream'" for every channel on every page load — noisy and
-// disables the channel anyway.
-//
-// Fix: return 404 for HEAD requests on the SPA-fallback path. Real assets
-// (anything in `f.root`) still serve normally on HEAD; only the index.html
-// fallback gets the 404 so the SSE pre-flight cleanly fails and the SPA
-// disables that channel on its own. Visible browser load is unchanged
-// because the SPA only HEAD-probes its SSE endpoints, never the SPA URL
-// itself.
-func (f *Frontend) handleSPA(w http.ResponseWriter, r *http.Request) {
-	p := strings.TrimPrefix(r.URL.Path, "/")
-	if p == "" {
-		if r.Method == http.MethodHead {
-			http.NotFound(w, r)
+// brandAssetNames lists every per-brand SVG/PNG file the overlay (or the
+// embedded FS) carries. Used to register one explicit handler per file at
+// startup so the rest of the path-space cleanly 404s.
+func (f *Frontend) brandAssetNames() []string {
+	seen := map[string]struct{}{}
+	var out []string
+	collect := func(dir fs.FS) {
+		if dir == nil {
 			return
 		}
-		f.writeIndex(w)
-		return
-	}
-	// Overlay wins if it has the file (any non-directory entry); falls
-	// back to embedded; falls back to index.html (SPA-routing).
-	if f.overlay != nil {
-		if file, err := f.overlay.Open(p); err == nil {
-			st, statErr := file.Stat()
-			file.Close()
-			if statErr == nil && !st.IsDir() {
-				http.ServeFileFS(w, r, f.overlay, p)
-				return
+		entries, err := fs.ReadDir(dir, ".")
+		if err != nil {
+			return
+		}
+		for _, e := range entries {
+			n := e.Name()
+			if e.IsDir() || n == "icon.svg" || n == "logo.svg" {
+				continue
 			}
+			switch strings.ToLower(filepath.Ext(n)) {
+			case ".svg", ".png", ".jpg", ".jpeg", ".webp", ".ico":
+			default:
+				continue
+			}
+			if _, ok := seen[n]; ok {
+				continue
+			}
+			seen[n] = struct{}{}
+			out = append(out, n)
 		}
 	}
-	file, err := f.root.Open(p)
-	if err != nil {
-		if r.Method == http.MethodHead {
-			http.NotFound(w, r)
-			return
-		}
-		f.writeIndex(w)
-		return
-	}
-	defer file.Close()
-	stat, err := file.Stat()
-	if err != nil || stat.IsDir() {
-		if r.Method == http.MethodHead {
-			http.NotFound(w, r)
-			return
-		}
-		f.writeIndex(w)
-		return
-	}
-	http.ServeFileFS(w, r, f.root, p)
+	collect(f.overlay)
+	collect(f.root)
+	return out
 }
 
-func (f *Frontend) writeIndex(w http.ResponseWriter) {
-	w.Header().Set("Content-Type", "text/html; charset=utf-8")
-	w.Header().Set("Cache-Control", "no-cache")
-	w.Write(f.index)
+// handleNamedBrandAsset returns a handler that serves a specific named
+// file from the overlay (preferred) or the embedded FS. 404 if neither
+// has it.
+func (f *Frontend) handleNamedBrandAsset(name string) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		if data := f.readStatic(name); data != nil {
+			w.Header().Set("Content-Type", contentTypeFor(name))
+			w.Header().Set("Cache-Control", "public, max-age=300")
+			w.Write(data)
+			return
+		}
+		http.NotFound(w, r)
+	}
 }
 
 // handleEnvs returns runtime config the SPA reads instead of build-time env
