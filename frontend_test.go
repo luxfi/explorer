@@ -192,6 +192,63 @@ func TestBrandStructHostMatching(t *testing.T) {
 	}
 }
 
+// TestNetworksForHost covers the network dropdown payload the SPA reads
+// from /envs.js. Mainnet hosts return ("mainnet", siblings) and testnet
+// hosts return ("testnet", siblings); unparseable hosts return ("", nil).
+func TestNetworksForHost(t *testing.T) {
+	cfg := Config{
+		BrandDefault: Brand{Name: "Lux Explorer"},
+		Chains: []ChainConfig{
+			{Slug: "cchain"}, {Slug: "zoo"}, {Slug: "hanzo"},
+		},
+	}
+	f, err := NewFrontend(cfg, NewChainRegistry())
+	if err != nil {
+		t.Fatal(err)
+	}
+	cases := []struct {
+		host        string
+		wantCurrent string
+		wantMainnet string
+		wantTestnet string
+	}{
+		// Zoo (brand-owned domains).
+		{"explore.zoo.network", "mainnet", "explore.zoo.network", "explorer.zoo-test.network"},
+		{"explorer.zoo-test.network", "testnet", "explore.zoo.network", "explorer.zoo-test.network"},
+		// Lux (brand-owned domains).
+		{"explore.lux.network", "mainnet", "explore.lux.network", "explorer.lux-test.network"},
+		{"explorer.lux-test.network", "testnet", "explore.lux.network", "explorer.lux-test.network"},
+		// Hanzo brand on .ai mainnet, .network testnet.
+		{"explore.hanzo.ai", "mainnet", "explore.hanzo.ai", "explorer.hanzo-test.network"},
+		{"explorer.hanzo-test.network", "testnet", "explore.hanzo.network", "explorer.hanzo-test.network"},
+		// lux.network prefix shape — explore-{slug}.lux.network.
+		{"explore-zoo.lux.network", "mainnet", "explore.zoo.network", "explorer.zoo-test.network"},
+		{"explore-zoo-test.lux.network", "testnet", "explore.zoo.network", "explorer.zoo-test.network"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.host, func(t *testing.T) {
+			cur, peers := f.networksForHost(tc.host)
+			if cur != tc.wantCurrent {
+				t.Errorf("current: got %q want %q", cur, tc.wantCurrent)
+			}
+			if peers["mainnet"] != tc.wantMainnet {
+				t.Errorf("mainnet: got %q want %q", peers["mainnet"], tc.wantMainnet)
+			}
+			if peers["testnet"] != tc.wantTestnet {
+				t.Errorf("testnet: got %q want %q", peers["testnet"], tc.wantTestnet)
+			}
+		})
+	}
+
+	// Unparseable hosts return empty.
+	for _, h := range []string{"localhost", "10.0.0.1", "explorer.lux-mainnet.svc.cluster.local", ""} {
+		cur, peers := f.networksForHost(h)
+		if cur != "" || peers != nil {
+			t.Errorf("expected empty result for %q, got cur=%q peers=%v", h, cur, peers)
+		}
+	}
+}
+
 // TestChainSlugForHost covers the host→default-chain promotion that
 // handleEnvs uses to set the SPA's initial chain selection. Hosts that
 // pin a chain (explore.zoo.network, explorer.zoo-test.network) must
