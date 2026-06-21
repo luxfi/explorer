@@ -7,33 +7,38 @@
 # Built from luxfi/explore via Dockerfile.branded — see ~/work/lux/explore.
 
 ARG GO_VERSION=1.26
-ARG INDEXER_REPO=https://github.com/luxfi/indexer.git
-ARG INDEXER_REF=main
-ARG GRAPH_REPO=https://github.com/luxfi/graph.git
-ARG GRAPH_REF=main
 
-# ---- Stage 1: clone indexer + graph siblings, build the unified binary ----
+# ---- Stage 1: build the unified FE + indexer + graph binary ----
+# graph + indexer are consumed as Go modules pinned in go.mod (luxfi/graph
+# v1.2.3, luxfi/indexer v1.4.5), NOT cloned as siblings — explorer has no
+# replace directive, so under -mod=mod the module cache is authoritative.
 FROM golang:${GO_VERSION}-alpine AS builder
-ARG INDEXER_REPO
-ARG INDEXER_REF
-ARG GRAPH_REPO
-ARG GRAPH_REF
 ARG VERSION=dev
 RUN apk add --no-cache gcc musl-dev sqlite-dev git
 
+# luxfi/* modules are private and may be re-tagged; resolve them direct
+# (not via proxy/sumdb) and skip checksum-db cross-checks, exactly as the
+# node image does. The default GITHUB_TOKEN is repo-scoped; a cross-org PAT
+# is injected as the BuildKit secret `ghtok` by docker.yml.
+ENV GOPRIVATE=github.com/luxfi/*,github.com/hanzoai/*
+ENV GONOSUMCHECK=github.com/luxfi/*
+ENV GONOSUMDB=github.com/luxfi/*
+ENV GONOPROXY=github.com/luxfi/*
+ENV GOFLAGS=-mod=mod
+
 WORKDIR /src
-RUN git clone --depth=1 --branch=${INDEXER_REF} ${INDEXER_REPO} indexer && \
-    git clone --depth=1 --branch=${GRAPH_REF}   ${GRAPH_REPO}   graph
+COPY go.mod go.sum ./
+# Configure git auth once so both `go mod download` here and the implicit
+# fetch during `go build` can reach private luxfi/* modules.
+RUN --mount=type=secret,id=ghtok,required=false \
+    if [ -s /run/secrets/ghtok ]; then \
+        git config --global url."https://x-access-token:$(cat /run/secrets/ghtok)@github.com/".insteadOf "https://github.com/"; \
+    fi && \
+    go mod download
 
-WORKDIR /src/explorer
 COPY . .
-
-# proxy.golang.org caches inconsistently for hanzoai/replicate@v0.6.0
-# (different POPs serve different zip hashes). -mod=mod populates go.sum
-# from whatever the proxy serves at build time and GOSUMDB=off skips
-# sum.golang.org cross-checks.
-RUN rm -f go.sum && CGO_ENABLED=1 CGO_CFLAGS="-D_LARGEFILE64_SOURCE" GOSUMDB=off \
-    go build -trimpath -mod=mod \
+RUN CGO_ENABLED=1 CGO_CFLAGS="-D_LARGEFILE64_SOURCE" \
+    go build -trimpath \
       -ldflags="-s -w -X main.version=${VERSION}" \
       -o /out/explorer .
 
