@@ -41,11 +41,16 @@ chains:
     coin: LUX
     enabled: true
     default: true
+    # DEX settlement precompile. Logs from this address are indexed into the
+    # `dex` (CLOB) subgraph as Fill/Market; defaults to 0x9999 if unset.
+    pool_manager: "0x0000000000000000000000000000000000009999"
     indexer: { poll_interval: 30s }
     graph:
       enabled: true
       subgraphs:
         - { name: amm,        schema: amm,        enabled: true }
+        # Native DEX (CLOB) — Order/Market/Fill from 0x9999 settlement events.
+        - { name: dex,        schema: dex,        enabled: true }
         - { name: securities, schema: securities, enabled: false }
     brand:
       name: Lux C-Chain

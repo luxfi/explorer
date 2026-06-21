@@ -23,16 +23,17 @@ type Config struct {
 // ChainID/RPC/Type/Default are optional and apply when the chain is loaded
 // from a config file.
 type ChainConfig struct {
-	Slug       string `json:"slug"     yaml:"slug"`
-	Name       string `json:"name"     yaml:"name"`
-	ChainID    int64  `json:"chain_id" yaml:"chain_id"`
-	Type       string `json:"type"     yaml:"type"` // evm, dag, linear, solana, bitcoin, cosmos
-	RPC        string `json:"rpc"      yaml:"rpc"`
-	WS         string `json:"ws"       yaml:"ws"`
-	CoinSymbol string `json:"coin"     yaml:"coin"`
-	Enabled    bool   `json:"enabled"  yaml:"enabled"`
-	Default    bool   `json:"default"  yaml:"default"`
-	Source     string `json:"source"   yaml:"-"` // config, env, mdns, admin
+	Slug        string `json:"slug"         yaml:"slug"`
+	Name        string `json:"name"         yaml:"name"`
+	ChainID     int64  `json:"chain_id"     yaml:"chain_id"`
+	Type        string `json:"type"         yaml:"type"` // evm, dag, linear, solana, bitcoin, cosmos
+	RPC         string `json:"rpc"          yaml:"rpc"`
+	WS          string `json:"ws"           yaml:"ws"`
+	CoinSymbol  string `json:"coin"         yaml:"coin"`
+	PoolManager string `json:"pool_manager" yaml:"pool_manager"` // DEX settlement precompile (0x9999); empty => indexer default
+	Enabled     bool   `json:"enabled"      yaml:"enabled"`
+	Default     bool   `json:"default"      yaml:"default"`
+	Source      string `json:"source"       yaml:"-"` // config, env, mdns, admin
 
 	Indexer IndexerSettings `json:"indexer,omitempty" yaml:"indexer,omitempty"`
 	Graph   GraphSettings   `json:"graph,omitempty"   yaml:"graph,omitempty"`
