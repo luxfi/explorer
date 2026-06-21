@@ -302,7 +302,11 @@ func (s *ChainSupervisor) runSubgraph(ctx context.Context, cfg ChainConfig, sg S
 		return
 	}
 
-	idx := graphidx.New(cfg.RPC, store)
+	idx := graphidx.NewWithConfig(graphidx.Config{
+		RPC:         cfg.RPC,
+		PoolManager: cfg.PoolManager, // empty => indexer defaults to 0x9999
+		StartBlock:  cfg.Indexer.StartBlock,
+	}, store)
 	go func() {
 		if err := idx.Run(ctx); err != nil && ctx.Err() == nil {
 			log.Printf("[%s/%s] indexer: %v", cfg.Slug, sg.Name, err)
