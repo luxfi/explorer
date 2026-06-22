@@ -307,6 +307,18 @@ func (s *ChainSupervisor) runSubgraph(ctx context.Context, cfg ChainConfig, sg S
 		PoolManager: cfg.PoolManager, // empty => indexer defaults to 0x9999
 		StartBlock:  cfg.Indexer.StartBlock,
 	}, store)
+	// One-shot enrichment of Token rows persisted by an older graph build with the
+	// address placeholder (symbol == shortAddr). Opt-in via BACKFILL_TOKENS=1; runs
+	// before Run so live indexing is not racing the same SeedToken writes. Cheap:
+	// ≤3 eth_calls per placeholder token, no re-sync. New tokens are enriched on
+	// first sight regardless of this flag.
+	if os.Getenv("BACKFILL_TOKENS") == "1" {
+		if n, err := idx.BackfillTokens(ctx); err != nil {
+			log.Printf("[%s/%s] token backfill: %v (enriched=%d)", cfg.Slug, sg.Name, err, n)
+		} else {
+			log.Printf("[%s/%s] token backfill: enriched=%d", cfg.Slug, sg.Name, n)
+		}
+	}
 	go func() {
 		if err := idx.Run(ctx); err != nil && ctx.Err() == nil {
 			log.Printf("[%s/%s] indexer: %v", cfg.Slug, sg.Name, err)
