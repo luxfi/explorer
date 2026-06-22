@@ -302,10 +302,20 @@ func (s *ChainSupervisor) runSubgraph(ctx context.Context, cfg ChainConfig, sg S
 		return
 	}
 
+	// The native D-Chain CLOB source feeds the `dex` subgraph ONLY: a native trade
+	// is D-Chain consensus state (clob_get_*), not an EVM log, so it belongs to the
+	// CLOB schema. The `amm` subgraph stays EVM-only (cfg.RPC eth_getLogs) — passing
+	// DexRPC solely to the dex subgraph keeps the two sources orthogonal and means
+	// adding the native source NEVER changes AMM indexing.
+	dexRPC := ""
+	if sg.Name == "dex" {
+		dexRPC = cfg.DexRPC
+	}
 	idx := graphidx.NewWithConfig(graphidx.Config{
 		RPC:         cfg.RPC,
 		PoolManager: cfg.PoolManager, // empty => indexer defaults to 0x9999
 		StartBlock:  cfg.Indexer.StartBlock,
+		DexRPC:      dexRPC,
 	}, store)
 	// One-shot enrichment of Token rows persisted by an older graph build with the
 	// address placeholder (symbol == shortAddr). Opt-in via BACKFILL_TOKENS=1; runs

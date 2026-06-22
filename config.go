@@ -31,6 +31,12 @@ type ChainConfig struct {
 	WS          string `json:"ws"           yaml:"ws"`
 	CoinSymbol  string `json:"coin"         yaml:"coin"`
 	PoolManager string `json:"pool_manager" yaml:"pool_manager"` // DEX settlement precompile (0x9999); empty => indexer default
+	// DexRPC is the native D-Chain (dexvm) CLOB read-RPC root, e.g.
+	// http://node:9650/ext/bc/D/dex. When set, the `dex` subgraph indexes the native
+	// CLOB committed state (clob_get_{markets,trades,orders}) IN ADDITION to any
+	// 0x9999 EVM settlement logs — a native D-Chain trade is a consensus state
+	// transition, not an EVM event, so it only appears here. Empty => EVM-only.
+	DexRPC string `json:"dex_rpc" yaml:"dex_rpc"`
 	Enabled     bool   `json:"enabled"      yaml:"enabled"`
 	Default     bool   `json:"default"      yaml:"default"`
 	Source      string `json:"source"       yaml:"-"` // config, env, mdns, admin

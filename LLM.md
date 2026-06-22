@@ -45,6 +45,14 @@ per env. Architecture:
   spawned by the supervisor when `chains[].graph.enabled: true` in the
   chains.yaml ConfigMap.
 
+  The **`dex`** subgraph has TWO sources (see graph LLM.md). To index the
+  NATIVE D-Chain CLOB (markets/fills/orders that exist as dexvm consensus
+  state, NOT as EVM 0x9999 logs), set `chains[].dex_rpc` to the chain's
+  D-Chain read-RPC root (`…/ext/bc/D/dex`) in chains.yaml. The supervisor
+  passes it ONLY to the `dex` subgraph's indexer (`runSubgraph`), so the
+  `amm` subgraph stays EVM-only and is never affected. Empty `dex_rpc` =
+  the prior EVM-0x9999-only behaviour.
+
 The legacy `lux-indexer` Deployment (same Go `indexerd` binary, only
 indexed EVM) has been **deleted**. Its routes are served by the unified
 explorer Deployment.
