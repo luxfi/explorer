@@ -5,7 +5,7 @@ go 1.26.4
 require (
 	github.com/gorilla/websocket v1.5.4-0.20250319132907-e064f32e3674
 	github.com/luxfi/graph v1.2.6
-	github.com/luxfi/indexer v1.4.5
+	github.com/luxfi/indexer v1.4.6
 	github.com/luxfi/mdns v0.1.1
 	github.com/mattn/go-sqlite3 v2.0.3+incompatible
 	gopkg.in/yaml.v3 v3.0.1
@@ -100,9 +100,3 @@ require (
 	modernc.org/memory v1.11.0 // indirect
 	modernc.org/sqlite v1.51.0 // indirect
 )
-
-// Build against the indexer source, not the pinned module version. The
-// Dockerfile clones luxfi/indexer at INDEXER_REF (default main) into the
-// sibling ../indexer; locally it's the sibling checkout. Without this the
-// pinned version is used and the clone is vestigial.
-replace github.com/luxfi/indexer => ../indexer
