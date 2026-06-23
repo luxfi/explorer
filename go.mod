@@ -100,3 +100,9 @@ require (
 	modernc.org/memory v1.11.0 // indirect
 	modernc.org/sqlite v1.51.0 // indirect
 )
+
+// Build against the indexer source, not the pinned module version. The
+// Dockerfile clones luxfi/indexer at INDEXER_REF (default main) into the
+// sibling ../indexer; locally it's the sibling checkout. Without this the
+// pinned version is used and the clone is vestigial.
+replace github.com/luxfi/indexer => ../indexer
