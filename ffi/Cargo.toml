@@ -1,0 +1,70 @@
+[package]
+name = "lux_explorer_ffi"
+version = "0.1.0"
+edition = "2021"
+publish = false
+description = "C-ABI staticlib that runs the Blockscout-rs explorer services in-process inside the Lux explorer Go binary (cgo). One Rust std copy wraps every needed service so the Go binary links a single .a."
+
+# staticlib => a single self-contained `liblux_explorer_ffi.a` that cgo links
+# directly into the explorer Go binary. We deliberately use ONE staticlib for
+# ALL wrapped services (not one .a per service) so there is exactly one copy of
+# the Rust std / panic runtime and no duplicate-symbol conflicts at link time.
+[lib]
+name = "lux_explorer_ffi"
+crate-type = ["staticlib"]
+
+[dependencies]
+# Shared runtime glue. Tokio is built per-service-thread (see src/lib.rs); these
+# are the only crates the FFI shim itself needs. anyhow is the common error type
+# every wrapped service entrypoint returns; tokio drives the per-service runtime.
+libc = "0.2"
+serde_json = "1"
+once_cell = "1"
+anyhow = "1"
+tokio = { version = "1", features = ["rt-multi-thread"] }
+
+# --- Wrapped services (path deps into the sibling explorer-rs checkout) -------
+# explorer-rs lives at ../../explorer-rs relative to this crate
+# (/Users/a/work/lux/explorer/ffi -> /Users/a/work/lux/luxfi/explorer-rs).
+# Each service is its OWN cargo workspace with no root workspace, so a plain
+# path dep on the `*-server` crate pulls exactly that service's dependency
+# graph. Each is feature-gated so a default `cargo build` (no --features) builds
+# only the FFI shim + stubs and stays fast; turn services on individually.
+#
+# sig-provider is wired and proven first: it is stateless (no DB, no
+# migrations), so it links and runs with the least build cost. Adding another
+# service is a two-line change: (1) add its path dep below under a matching
+# feature, (2) add a `service!{...}` entry in src/lib.rs. See README.md.
+sig-provider-server = { path = "../../explorer-rs/sig-provider/sig-provider-server", optional = true }
+
+# The remaining services are listed (commented) with their exact paths so
+# scaling out is mechanical. They are NOT enabled by default because each pins a
+# DIFFERENT major of blockscout-service-launcher (0.13/0.17/0.19/0.21) and pulls
+# DB/migration stacks (sea-orm) — combining all of them inflates build time and
+# must be done one at a time, verifying the link after each. See README.md
+# "Scaling out" for the exact recipe.
+#
+# smart-contract-verifier-server   = { path = "../../explorer-rs/smart-contract-verifier/smart-contract-verifier-server", optional = true }
+# stats-server                     = { path = "../../explorer-rs/stats/stats-server", optional = true }
+# multichain-aggregator-server     = { path = "../../explorer-rs/multichain-aggregator/multichain-aggregator-server", optional = true }
+# visualizer-server                = { path = "../../explorer-rs/visualizer/visualizer-server", optional = true }
+
+[features]
+# Default = no service compiled in: the staticlib still builds (fast) and every
+# entrypoint returns LUX_FFI_ERR_DISABLED so the Go side links and degrades
+# gracefully. `make single` turns on the services it wants.
+default = []
+sig-provider = ["dep:sig-provider-server"]
+# smart-contract-verifier = ["dep:smart-contract-verifier-server"]
+# stats = ["dep:stats-server"]
+# multichain-aggregator = ["dep:multichain-aggregator-server"]
+# visualizer = ["dep:visualizer-server"]
+
+# Convenience: every wired service at once.
+all = ["sig-provider"]
+
+[profile.release]
+# Smaller, faster-linking staticlib. LTO off keeps incremental builds sane while
+# scaling services out; flip to "thin" for a production single binary.
+lto = false
+codegen-units = 16

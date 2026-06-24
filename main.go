@@ -119,6 +119,16 @@ func main() {
 	go registry.hub.Run(ctx)
 	go supervisor.Wait(ctx)
 
+	// In the `-tags ffi` build this launches the Blockscout-rs explorer
+	// services (sig-provider, …) in-process via cgo on their own Tokio
+	// runtime threads — one binary runs everything. In the default build
+	// startFFIServices is a no-op (see ffi_off.go). Per-service settings are
+	// keyed by service name; empty => the service's upstream defaults / env.
+	if ffiEnabled {
+		log.Printf("[explorer] ffi: starting in-process Rust services")
+	}
+	startFFIServices(map[string]string{})
+
 	frontend, err := NewFrontend(cfg, registry)
 	if err != nil {
 		log.Fatalf("[explorer] frontend: %v", err)

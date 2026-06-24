@@ -35,3 +35,6 @@ QWEN.md
 # Runtime
 logs/
 .claude/
+
+# Rust FFI staticlib build artifacts (the .a is produced by make single)
+ffi/target/
