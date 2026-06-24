@@ -192,7 +192,7 @@ func main() {
 	supervisor.MountRoutes(mux)
 	frontend.Mount(mux)
 
-	// zip is the FRONT router (front.go): it reverse-proxies /api/<prefix>/*
+	// zip is the FRONT router (front.go): it reverse-proxies /v1/<prefix>/*
 	// to each in-process service and serves everything else from the explorer
 	// mux built above. When no services are configured the front app is just
 	// the mux behind zip's security middleware — identical behaviour, one

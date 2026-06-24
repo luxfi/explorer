@@ -22,7 +22,7 @@ type Config struct {
 // ServicesConfig configures the in-process Blockscout-rs services that the
 // `-tags ffi` build runs as goroutine-driven Tokio threads inside this one
 // binary. The zip front router reverse-proxies each enabled service under
-// /api/<prefix>/* → http://127.0.0.1:<port>. In the default (non-FFI) build
+// /v1/<prefix>/* → http://127.0.0.1:<port>. In the default (non-FFI) build
 // nothing is launched and these proxies are not mounted (see services.go).
 type ServicesConfig struct {
 	// Enabled is the master switch. When false (default) no in-process
@@ -41,7 +41,7 @@ type ServiceConfig struct {
 	// passed to it.
 	Name string `yaml:"name"`
 	// Prefix is the URL path segment the front router proxies under
-	// (/api/<prefix>/*). Empty => derived from Name (sig-provider => "sig").
+	// (/v1/<prefix>/*). Empty => derived from Name (sig-provider => "sig").
 	Prefix string `yaml:"prefix"`
 	// HTTPPort is the localhost port the service's own HTTP server binds.
 	// Empty => a default is assigned per service (see servicePort).

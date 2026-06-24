@@ -114,13 +114,13 @@ own HTTP server bound to **loopback** (`127.0.0.1:<port>`, assigned from
 exposed. Routing, in registration order:
 
 ```
-/api/<prefix>/*   →  httputil.ReverseProxy → http://127.0.0.1:<svc_http_port>   (mountServiceProxies, services.go)
+/v1/<prefix>/*   →  httputil.ReverseProxy → http://127.0.0.1:<svc_http_port>   (mountServiceProxies, services.go)
 /*                →  the existing Go-native explorer *http.ServeMux             (zip.AdaptNetHTTP, front.go)
 ```
 
-The proxy strips the `/api/<prefix>` mount prefix, so the upstream sees its own
-native path (e.g. `/api/sig/health` → sig-provider `/health`;
-`/api/sig/api/v1/abi/function` → `/api/v1/abi/function`). Enabled services +
+The proxy strips the `/v1/<prefix>` mount prefix, so the upstream sees its own
+native path (e.g. `/v1/sig/health` → sig-provider `/health`;
+`/v1/sig/api/v1/abi/function` → `/api/v1/abi/function`). Enabled services +
 ports are configured under `services:` in chains.yaml
 (`ServicesConfig` → `resolveServices` is the single source of truth both the
 proxy and this FFI launcher read). Default prefixes:
@@ -128,7 +128,7 @@ proxy and this FFI launcher read). Default prefixes:
 `multichain-aggregator→multichain`, `visualizer→visualizer`.
 
 Proven end-to-end (sig-provider, one process owning both :8090 and the service
-port): `curl /api/sig/health → {"status":"SERVING"}`, matching a direct hit on
+port): `curl /v1/sig/health → {"status":"SERVING"}`, matching a direct hit on
 the in-process service port.
 
 ## Database: SQLite status per service (verified against explorer-rs)

@@ -11,7 +11,7 @@ package main
 //  2. SETTINGS — build the JSON each service's upstream `Settings` deserializes
 //     (server.http.addr / server.grpc.addr, and DB url where applicable).
 //  3. PROXY    — mount a reverse-proxy on the zip front App at
-//     /api/<prefix>/* → http://127.0.0.1:<http_port>.
+//     /v1/<prefix>/* → http://127.0.0.1:<http_port>.
 //
 // The actual in-process LAUNCH (cgo → liblux_explorer_ffi.a) is the ONLY part
 // that differs by build tag and lives in ffi_on.go / ffi_off.go. That split is
@@ -38,7 +38,7 @@ import (
 const servicePortBase = 8050
 
 // defaultPrefix maps an FFI service name to its default URL prefix. The prefix
-// is the path segment the SPA / clients hit: /api/<prefix>/*. Kept short and
+// is the path segment the SPA / clients hit: /v1/<prefix>/*. Kept short and
 // stable so front-end calls don't churn when a service is renamed upstream.
 var defaultPrefix = map[string]string{
 	"sig-provider":            "sig",
@@ -159,24 +159,24 @@ func buildSettingsJSON(s ServiceConfig, httpPort, grpcPort int) string {
 }
 
 // mountServiceProxies registers a reverse-proxy on the zip front App for each
-// resolved in-process service: /api/<prefix>/* → http://127.0.0.1:<http_port>.
+// resolved in-process service: /v1/<prefix>/* → http://127.0.0.1:<http_port>.
 //
-// We strip the /api/<prefix> mount prefix before forwarding so the upstream
+// We strip the /v1/<prefix> mount prefix before forwarding so the upstream
 // service sees the path it expects (e.g. /api/v1/abi/... not
-// /api/sig/api/v1/abi/...). zip.AdaptNetHTTP wraps the stdlib
+// /v1/sig/api/v1/abi/...). zip.AdaptNetHTTP wraps the stdlib
 // httputil.ReverseProxy onto a zip route — the simplest thing that works, per
 // the brief: no bespoke fasthttp proxy, no escape hatch.
 //
 // Mounted via app.Mount which registers `All(prefix+"/*")`. These are
 // registered BEFORE the catch-all explorer mux (see buildFrontApp) so Fiber's
-// in-order matching routes /api/<prefix>/* to the service and everything else
+// in-order matching routes /v1/<prefix>/* to the service and everything else
 // to the explorer.
 func mountServiceProxies(app *zip.App, svcs []resolvedService) {
 	for _, s := range svcs {
 		target := &url.URL{Scheme: "http", Host: fmt.Sprintf("127.0.0.1:%d", s.HTTPPort)}
-		mountPrefix := "/api/" + s.Prefix
+		mountPrefix := "/v1/" + s.Prefix
 		rp := httputil.NewSingleHostReverseProxy(target)
-		// Strip the /api/<prefix> mount prefix so the upstream sees its own
+		// Strip the /v1/<prefix> mount prefix so the upstream sees its own
 		// native path. NewSingleHostReverseProxy's default Director only sets
 		// the host; we extend it to rewrite the path.
 		base := rp.Director

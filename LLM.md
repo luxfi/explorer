@@ -64,7 +64,7 @@ cgo, keeping their own HTTP servers on loopback.
   Go-native binary, no cgo — `ffi_off.go` stub). Scope services with
   `make single FFI_FEATURES=sig-provider,visualizer`.
 - **Front router (`front.go`):** zip owns the public listener. Routes, in order:
-  `/api/<prefix>/*` → `httputil.ReverseProxy` → `127.0.0.1:<svc_port>`
+  `/v1/<prefix>/*` → `httputil.ReverseProxy` → `127.0.0.1:<svc_port>`
   (prefix stripped); `/*` → the existing net/http explorer mux via
   `zip.AdaptNetHTTP`. Security headers + CORS are zip middleware.
 - **Config (`services:` in chains.yaml, `ServicesConfig`/`resolveServices`):**
@@ -72,7 +72,7 @@ cgo, keeping their own HTTP servers on loopback.
   HTTP=base+2n/gRPC=+1), prefixes, and per-service settings JSON. The FFI
   launcher (`ffi_on.go startFFIServices`) and the proxy both read it.
 - **Status:** sig-provider WIRED + PROVEN end-to-end (one process owns :8090
-  and :8050; `curl /api/sig/health → {"status":"SERVING"}`). visualizer +
+  and :8050; `curl /v1/sig/health → {"status":"SERVING"}`). visualizer +
   smart-contract-verifier are stateless and ready to wire (recipe in
   `ffi/README.md`). stats + multichain-aggregator stay DISABLED:
   `blockscout-service-launcher` DB layer is Postgres-only (no SQLite without a

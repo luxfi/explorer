@@ -4,7 +4,7 @@ package main
 //
 // One zip.App owns the public listener. It composes two things, in order:
 //
-//   1. /api/<prefix>/*  reverse-proxies to each in-process Blockscout-rs
+//   1. /v1/<prefix>/*  reverse-proxies to each in-process Blockscout-rs
 //      service (mountServiceProxies, services.go). Registered FIRST so Fiber's
 //      in-order route matching sends these to the Rust services.
 //
@@ -53,7 +53,7 @@ func buildFrontApp(base http.Handler, svcs []resolvedService) *zip.App {
 	})
 
 	// (1) Per-service reverse proxies — registered before the catch-all so
-	// /api/<prefix>/* wins over /*.
+	// /v1/<prefix>/* wins over /*.
 	mountServiceProxies(app, svcs)
 
 	// (2) The whole existing explorer mux as the catch-all. zip.AdaptNetHTTP
