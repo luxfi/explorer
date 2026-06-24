@@ -60,6 +60,7 @@ require (
 	github.com/hanzoai/ltx v0.5.1 // indirect
 	github.com/hanzoai/lz4/v4 v4.1.22 // indirect
 	github.com/hanzoai/replicate v0.7.2 // indirect
+	github.com/hanzoai/sqlite v0.0.0
 	github.com/hashicorp/golang-lru/v2 v2.0.7 // indirect
 	github.com/jacobsa/fuse v0.0.0-20260302145937-f1ba38d60fdf // indirect
 	github.com/jalaali/go-jalaali v0.0.0-20250521085720-bf793ab67800 // indirect
@@ -137,3 +138,5 @@ replace github.com/hanzoai/zip => ../../../hanzo/hanzoai/zip
 // VFS over s3:// / file:// backends — backs the explorer's SQLite DBs so the
 // single binary needs no PVC (HIP-0106/0107). See vfsmount.go.
 replace github.com/hanzoai/vfs => ../../../hanzo/hanzoai/vfs
+
+replace github.com/hanzoai/sqlite => ../../../hanzo/hanzoai/sqlite

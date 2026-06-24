@@ -13,7 +13,7 @@ import (
 	"sync"
 	"time"
 
-	_ "github.com/mattn/go-sqlite3"
+	_ "github.com/hanzoai/sqlite"
 
 	"github.com/luxfi/graph/engine"
 	graphidx "github.com/luxfi/graph/indexer"
@@ -249,7 +249,7 @@ func (s *ChainSupervisor) mountIndexerAPI(ctx context.Context, cfg ChainConfig, 
 			continue
 		}
 		if cfg.Type == "" || cfg.Type == "evm" {
-			db, err := sql.Open("sqlite3", "file:"+dbPath+"?mode=ro")
+			db, err := sql.Open("sqlite", "file:"+dbPath+"?mode=ro")
 			if err == nil {
 				var n int
 				_ = db.QueryRow("SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name='evm_blocks'").Scan(&n)
