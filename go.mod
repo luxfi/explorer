@@ -4,7 +4,9 @@ go 1.26.4
 
 require (
 	github.com/gorilla/websocket v1.5.4-0.20250319132907-e064f32e3674
+	github.com/hanzoai/vfs v0.0.0-00010101000000-000000000000
 	github.com/hanzoai/zip v0.0.0-00010101000000-000000000000
+	github.com/luxfi/age v1.5.0
 	github.com/luxfi/graph v1.2.6
 	github.com/luxfi/indexer v1.4.6
 	github.com/luxfi/log v1.4.3
@@ -14,8 +16,28 @@ require (
 )
 
 require (
+	bazil.org/fuse v0.0.0-20230120002735-62a210ff1fd5 // indirect
 	filippo.io/hpke v0.4.0 // indirect
 	github.com/andybalholm/brotli v1.2.1 // indirect
+	github.com/aws/aws-sdk-go-v2 v1.41.2 // indirect
+	github.com/aws/aws-sdk-go-v2/aws/protocol/eventstream v1.7.5 // indirect
+	github.com/aws/aws-sdk-go-v2/config v1.32.8 // indirect
+	github.com/aws/aws-sdk-go-v2/credentials v1.19.8 // indirect
+	github.com/aws/aws-sdk-go-v2/feature/ec2/imds v1.18.17 // indirect
+	github.com/aws/aws-sdk-go-v2/internal/configsources v1.4.18 // indirect
+	github.com/aws/aws-sdk-go-v2/internal/endpoints/v2 v2.7.18 // indirect
+	github.com/aws/aws-sdk-go-v2/internal/ini v1.8.4 // indirect
+	github.com/aws/aws-sdk-go-v2/internal/v4a v1.4.18 // indirect
+	github.com/aws/aws-sdk-go-v2/service/internal/accept-encoding v1.13.5 // indirect
+	github.com/aws/aws-sdk-go-v2/service/internal/checksum v1.9.10 // indirect
+	github.com/aws/aws-sdk-go-v2/service/internal/presigned-url v1.13.18 // indirect
+	github.com/aws/aws-sdk-go-v2/service/internal/s3shared v1.19.18 // indirect
+	github.com/aws/aws-sdk-go-v2/service/s3 v1.96.2 // indirect
+	github.com/aws/aws-sdk-go-v2/service/signin v1.0.5 // indirect
+	github.com/aws/aws-sdk-go-v2/service/sso v1.30.9 // indirect
+	github.com/aws/aws-sdk-go-v2/service/ssooidc v1.35.14 // indirect
+	github.com/aws/aws-sdk-go-v2/service/sts v1.41.6 // indirect
+	github.com/aws/smithy-go v1.24.1 // indirect
 	github.com/beorn7/perks v1.0.1 // indirect
 	github.com/cenkalti/backoff v2.2.1+incompatible // indirect
 	github.com/cespare/xxhash/v2 v2.3.0 // indirect
@@ -39,6 +61,7 @@ require (
 	github.com/hanzoai/lz4/v4 v4.1.22 // indirect
 	github.com/hanzoai/replicate v0.7.2 // indirect
 	github.com/hashicorp/golang-lru/v2 v2.0.7 // indirect
+	github.com/jacobsa/fuse v0.0.0-20260302145937-f1ba38d60fdf // indirect
 	github.com/jalaali/go-jalaali v0.0.0-20250521085720-bf793ab67800 // indirect
 	github.com/klauspost/compress v1.18.6 // indirect
 	github.com/klauspost/cpuid/v2 v2.3.0 // indirect
@@ -46,7 +69,6 @@ require (
 	github.com/lib/pq v1.12.3 // indirect
 	github.com/lmittmann/tint v1.1.3 // indirect
 	github.com/luxfi/accel v1.1.9 // indirect
-	github.com/luxfi/age v1.5.0 // indirect
 	github.com/luxfi/cache v1.2.1 // indirect
 	github.com/luxfi/codec v1.1.4 // indirect
 	github.com/luxfi/compress v0.0.5 // indirect
@@ -84,6 +106,7 @@ require (
 	github.com/valyala/fasthttp v1.70.0 // indirect
 	github.com/wasilibs/go-re2 v1.11.0 // indirect
 	github.com/wasilibs/wazero-helpers v0.0.0-20250123031827-cd30c44769bb // indirect
+	github.com/zeebo/blake3 v0.2.4 // indirect
 	github.com/zeebo/xxh3 v1.1.0 // indirect
 	go.opentelemetry.io/auto/sdk v1.2.1 // indirect
 	go.opentelemetry.io/otel v1.44.0 // indirect
@@ -109,3 +132,8 @@ require (
 )
 
 replace github.com/hanzoai/zip => ../../../hanzo/hanzoai/zip
+
+// vfs is unpublished; build against the sibling clone. Block-level PQ-encrypted
+// VFS over s3:// / file:// backends — backs the explorer's SQLite DBs so the
+// single binary needs no PVC (HIP-0106/0107). See vfsmount.go.
+replace github.com/hanzoai/vfs => ../../../hanzo/hanzoai/vfs

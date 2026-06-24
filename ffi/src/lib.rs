@@ -159,6 +159,20 @@ service!(
     run = |s| sig_provider_server::sig_provider(s),
 );
 
+// stats — DB-backed, runs on SQLite (backed by hanzoai/vfs) via the launcher's
+// initialize_database. The entrypoint is `stats(Settings, None)` (the `None` is
+// the optional runtime-setup override). Settings.db_url is the sqlite:// url
+// services.go derives from the vfs mountpoint. See README "Database" section:
+// stats CONNECTS on SQLite; its Postgres-specific migrations are the documented
+// porting follow-up (run_migrations should stay false until they are ported).
+service!(
+    fn_name = lux_explorer_start_stats,
+    name = "stats",
+    feature = "stats",
+    settings = stats_server::Settings,
+    run = |s| stats_server::stats(s, None),
+);
+
 // --- Scale-out (uncomment the dep+feature in Cargo.toml, then this block) ---
 //
 // service!(
@@ -167,14 +181,6 @@ service!(
 //     feature = "smart-contract-verifier",
 //     settings = smart_contract_verifier_server::Settings,
 //     run = |s| smart_contract_verifier_server::run(s),
-// );
-//
-// service!(
-//     fn_name = lux_explorer_start_stats,
-//     name = "stats",
-//     feature = "stats",
-//     settings = stats_server::Settings,
-//     run = |s| stats_server::stats(s, None),
 // );
 //
 // service!(
@@ -203,9 +209,9 @@ pub extern "C" fn lux_explorer_start_all() -> i32 {
     let empty = b"{}\0".as_ptr() as *const c_char;
     let mut rc = LUX_FFI_OK;
     rc |= lux_explorer_start_sig_provider(empty);
+    rc |= lux_explorer_start_stats(empty);
     // Mirror each service! entry here as it is enabled:
     // rc |= lux_explorer_start_smart_contract_verifier(empty);
-    // rc |= lux_explorer_start_stats(empty);
     // rc |= lux_explorer_start_multichain_aggregator(empty);
     // rc |= lux_explorer_start_visualizer(empty);
     rc

@@ -37,6 +37,16 @@ tokio = { version = "1", features = ["rt-multi-thread"] }
 # feature, (2) add a `service!{...}` entry in src/lib.rs. See README.md.
 sig-provider-server = { path = "../../explorer-rs/sig-provider/sig-provider-server", optional = true }
 
+# stats: DB-backed. Runs on SQLite (no Postgres) via the launcher's
+# initialize_database — its db_url is sqlite://<vfs-mount>/stats.db?mode=rwc,
+# supplied by services.go from the hanzoai/vfs mountpoint. NOTE: stats' sea-orm
+# migrations are Postgres-specific and do not yet run on SQLite (see
+# stats-server/tests/sqlite_migration.rs — the first migration's
+# `CREATE TYPE … AS ENUM` fails); connecting is proven, migration porting is the
+# documented follow-up. stats pins tonic 0.12, so it is its own cargo workspace
+# pulled as a path dep (does not share the 0.21 launcher graph).
+stats-server = { path = "../../explorer-rs/stats/stats-server", optional = true }
+
 # The remaining services are listed (commented) with their exact paths so
 # scaling out is mechanical. They are NOT enabled by default because each pins a
 # DIFFERENT major of blockscout-service-launcher (0.13/0.17/0.19/0.21) and pulls
@@ -55,13 +65,13 @@ sig-provider-server = { path = "../../explorer-rs/sig-provider/sig-provider-serv
 # gracefully. `make single` turns on the services it wants.
 default = []
 sig-provider = ["dep:sig-provider-server"]
+stats = ["dep:stats-server"]
 # smart-contract-verifier = ["dep:smart-contract-verifier-server"]
-# stats = ["dep:stats-server"]
 # multichain-aggregator = ["dep:multichain-aggregator-server"]
 # visualizer = ["dep:visualizer-server"]
 
 # Convenience: every wired service at once.
-all = ["sig-provider"]
+all = ["sig-provider", "stats"]
 
 [profile.release]
 # Smaller, faster-linking staticlib. LTO off keeps incremental builds sane while

@@ -131,31 +131,123 @@ Proven end-to-end (sig-provider, one process owning both :8090 and the service
 port): `curl /v1/sig/health → {"status":"SERVING"}`, matching a direct hit on
 the in-process service port.
 
-## Database: SQLite status per service (verified against explorer-rs)
+## Database: SQLite on hanzoai/vfs — no Postgres, no blockscout-service
 
-The brief asked to run DB-backed services on **SQLite** if sea-orm allows it
-with minimal effort. It does **not**, here — documented exactly:
+DB-backed services now run on **SQLite**, with the file living on a
+**hanzoai/vfs** mount (block-level PQ-encrypted, backed by `s3://` in prod or
+`file://` for local dev). No Postgres, no `blockscout` indexer DB hardcode. The
+three pieces:
 
-| service                 | DB? | SQLite-able? | status   | what it needs |
-|-------------------------|-----|--------------|----------|---------------|
-| sig-provider            | no  | n/a          | **WIRED + PROVEN** | nothing (stateless) |
-| visualizer              | no  | n/a          | ready to wire | nothing (stateless) — clean next target |
-| smart-contract-verifier | no  | n/a          | ready to wire | nothing (stateless) |
-| stats                   | yes | **no**       | disabled | its **own** Postgres + a populated **Blockscout indexer Postgres** to read from |
-| multichain-aggregator   | yes | **no**       | disabled | its own Postgres (+ optional replica) |
+**1. Launcher — no Postgres hardcode.**
+`blockscout_service_launcher::database` was Postgres-only:
+`initialize_postgres::<Migrator>()` pins `DatabaseBackend::Postgres` and runs a
+`CREATE DATABASE` dance over `postgresql://…` DSNs. We added
+`initialize_database::<Migrator>()` (`database.rs`) which branches on the DSN
+scheme: `sqlite://…?mode=rwc` connects straight through (sea-orm infers
+`DatabaseBackend::Sqlite`; the file is created by the rwc open mode, the
+Postgres-only CREATE DATABASE is skipped); `postgresql://…` is unchanged.
+Proven by `blockscout-service-launcher/src/database.rs` `sqlite_tests`
+(connects, creates the file, runs DDL — `cargo test -p blockscout-service-launcher --features database-1 sqlite_tests`).
 
-Why no SQLite: `blockscout_service_launcher::database` is **Postgres-only** —
-`initialize_postgres::<Migrator>()` pins `sea_orm::DatabaseBackend::Postgres`
-and formats `postgresql://…` DSNs (`libs/blockscout-service-launcher/src/database.rs`
-lines 39/67/294). `stats-server` calls that directly (`server.rs:206 init_stats_db`)
-**and** opens a second connection to a Blockscout indexer DB
-(`server.rs:223 connect_to_indexer_db_common`). Forcing SQLite would mean
-patching the launcher's backend selection + every migration — outside "minimal
-effort" and explicitly a Rust rewrite the brief forbids. So stats /
-multichain-aggregator stay disabled. The Go side already passes a
-`database.url` (with `create_database` + `run_migrations`) through
-`buildSettingsJSON` whenever `ServiceConfig.DatabaseURL` is set, so the day a
-Postgres is provided these turn on with config alone — no code change.
+**2. vfs mount in the Go binary** (`vfsmount.go`, off by default).
+`setupVFS` opens the configured backend (`vfs.backend: s3://…` or `file://…` in
+chains.yaml), mounts it at a local mountpoint, and `resolveServices`
+(`services.go`) stamps each DB-backed service's `database.url` as
+`sqlite://<mountpoint>/<svc>.db?mode=rwc`. The FUSE mount needs the `fuse` build
+tag + macFUSE/fuse-t (or Linux kernel FUSE); without it the mountpoint degrades
+to a plain local dir (the s3:// backing is a build-tag swap, the SQLite path is
+identical). vfs's own `TestSQLiteRoundTrip` proves a SQLite DB survives the
+encrypted block layer byte-for-byte; the explorer's `TestSetupVFS*` /
+`TestResolveServicesStampsSQLiteUrlOnVFSMount` prove the wiring.
 
-`ServiceConfig.DatabaseURL` in chains.yaml feeds `database.url` in the settings
-JSON `startFFIServices` sends; migrations run when present.
+**3. stats — CONNECTS on SQLite; migrations are the documented follow-up.**
+
+| service                 | DB? | connects on SQLite? | migrations on SQLite? | status |
+|-------------------------|-----|---------------------|-----------------------|--------|
+| sig-provider            | no  | n/a                 | n/a                   | **WIRED + PROVEN** (stateless) |
+| visualizer              | no  | n/a                 | n/a                   | ready to wire (stateless) |
+| smart-contract-verifier | no  | n/a                 | n/a                   | ready to wire (stateless) |
+| **stats**               | yes | **YES (proven)**    | **NO — needs porting**| launcher swapped; connect proven; see below |
+| multichain-aggregator   | yes | yes (same launcher path) | no — same class of migrations | follows stats |
+
+stats pins `blockscout-service-launcher 0.19` + **tonic 0.12**, while the in-tree
+`libs/blockscout-service-launcher` is **0.21** + tonic 0.14 (incompatible with
+stats' grpc router). So stats builds against a **vendored 0.19 launcher carrying
+the identical SQLite patch**: `libs/blockscout-service-launcher-0.19-sqlite`
+(stats `Cargo.toml` path-deps it; `stats-server/src/server.rs:init_stats_db`
+calls `initialize_database`). `stats-server` compiles clean and **connects to a
+SQLite DB on disk with no Postgres** — proven by
+`stats-server/tests/sqlite_migration.rs::stats_connects_to_sqlite_without_postgres`.
+
+**The long pole — stats' migrations are Postgres-specific.** Running them on
+SQLite fails at the FIRST statement (captured by
+`stats_migrations_fail_on_sqlite_and_we_capture_why`):
+
+```
+Migration Error: Execution Error: error returned from database: (code: 1)
+near "TYPE": syntax error
+Query: CREATE TYPE "chart_type" AS ENUM ('COUNTER','LINE')
+```
+
+Every Postgres-ism that must be ported (4 migrations, `stats/migration/src/`):
+
+| construct | migration | SQLite port |
+|-----------|-----------|-------------|
+| `CREATE TYPE … AS ENUM` (chart_type, chart_resolution) | init, add_resolution | drop the type; use `TEXT` + a `CHECK (col IN (…))` constraint |
+| `INT GENERATED BY DEFAULT AS IDENTITY PRIMARY KEY` | init | `INTEGER PRIMARY KEY AUTOINCREMENT` |
+| `DEFAULT (now())`, `now() at time zone 'utc'` | init, add_updated_at | `DEFAULT CURRENT_TIMESTAMP` |
+| `timestamptz` / `ALTER COLUMN … TYPE timestamptz` | add_updated_at | SQLite has no typed timestamp/ALTER TYPE — store TEXT/INTEGER; column already exists, drop the ALTER |
+| `COMMENT ON TABLE …` | init | unsupported — drop (comments are cosmetic) |
+| `ALTER TABLE … ADD FOREIGN KEY` | init | SQLite cannot add FK via ALTER — declare it inline in CREATE TABLE |
+| `ALTER TABLE … DROP/ADD CONSTRAINT … UNIQUE` | add_resolution | SQLite cannot ALTER constraints — create a UNIQUE INDEX instead |
+| `DELETE … WHERE date = to_timestamp(0)` | drop_zero_timestamp | replace `to_timestamp(0)` with the literal epoch the column stores |
+
+Because `from_sql` (`migration/src/lib.rs`) runs each `;`-split statement through
+`Statement::from_string(manager.get_database_backend(), …)` — i.e. raw SQL, not
+the sea-query builder — the port means **rewriting these migrations to branch on
+`manager.get_database_backend()`** (Postgres SQL vs SQLite SQL) or rewriting them
+in backend-agnostic sea-query. That is a self-contained Rust task in the stats
+crate, tracked here; it does **not** touch the launcher or the Go binary.
+multichain-aggregator's migrations are the same class (enums, identity,
+timestamptz) and port the same way.
+
+**Also required at stats runtime (independent of migrations):** stats needs an
+`indexer_db_url` — `server.rs:connect_to_main_indexer_db` errors `"Indexer DB
+URL is not set"` without one — and the `charts_config` / `layout_config` /
+`update_groups_config` files. Those make stats *serve*; the brief's win is that
+it *connects to its own SQLite DB on the vfs mount with no Postgres*, which is
+proven.
+
+### FFI link note — one staticlib can't yet hold sig-provider + stats
+
+`make single FFI_FEATURES=stats` builds stats into the staticlib. Combining
+**sig-provider AND stats** in one `.a` currently fails to build because the
+merged graph resolves **two `prost-build` majors** (0.11 from sig-provider, 0.13
+from stats' proto crates), and `zetachain-cctx-proto`'s build script (pulled via
+stats) is written against one major while `tonic_build` hands it the other:
+
+```
+error[E0308]: mismatched types … expected trait `prost_build::ServiceGenerator`
+(prost-build 0.11.9), found trait `ServiceGenerator` (prost-build 0.13.5)
+  --> zetachain-cctx-proto/build.rs:46
+```
+
+This is the multi-major lock-reconciliation chore the "Scaling out" note above
+warns about, not a stats-on-SQLite problem. There is also a second, harder
+collision once stats *does* link: stats pulls `sqlx`'s bundled SQLite C library
+(`libsqlite3-sys`, ~401 `sqlite3_*` symbols) while the Go side already links
+`mattn/go-sqlite3`'s bundled SQLite C (pulled transitively by `luxfi/indexer`
+and `luxfi/graph`, which both `sql.Open("sqlite3", …)`) — `ld` reports 245
+`duplicate symbol _sqlite3_*`. Shipping sig-provider+stats in one binary needs
+ONE C SQLite: either switch `luxfi/indexer`/`luxfi/graph` to the pure-Go
+`modernc.org/sqlite` (no C — the clean end state, leaves only sqlx's copy), or
+build `libsqlite3-sys` against a shared system libsqlite3. Until then, stats
+builds and links **alone** (`make single FFI_FEATURES=stats`) against a lock
+seeded from stats' own `Cargo.lock` (prost-build 0.13 only); sig-provider is the
+default `make single`. Both proven to link individually; co-linking is the
+documented follow-up.
+
+`ServiceConfig.DatabaseURL` (or the vfs-derived sqlite url) feeds `database.url`
+in the settings JSON `startFFIServices` sends. **Keep `run_migrations: false`
+for stats until the migrations are ported** — otherwise boot fails at the
+`CREATE TYPE` above.

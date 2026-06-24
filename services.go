@@ -24,6 +24,7 @@ import (
 	"net/http"
 	"net/http/httputil"
 	"net/url"
+	"path/filepath"
 	"strings"
 
 	"github.com/hanzoai/zip"
@@ -60,11 +61,28 @@ type resolvedService struct {
 	SettingsJSON string
 }
 
+// dbBackedServices are the wrapped services that open a sea-orm connection and
+// therefore take a `database.url`. When a vfs mountpoint is provided and such a
+// service has no explicit database_url in chains.yaml, resolveServices defaults
+// it to a SQLite file on the mount — that is the whole point of the vfs wiring:
+// a self-contained binary whose service state lives on s3:// via vfs, no
+// Postgres. Stateless services (sig-provider, visualizer, verifier) are absent
+// here and never get a url.
+var dbBackedServices = map[string]bool{
+	"stats":                 true,
+	"multichain-aggregator": true,
+}
+
 // resolveServices normalizes ServicesConfig into concrete resolvedService
 // records. Disabled or empty-named entries are dropped. Ports auto-assign in
 // listing order from servicePortBase when not pinned. This is the single
 // source of truth both the proxy and the FFI launcher read from.
-func resolveServices(cfg ServicesConfig) []resolvedService {
+//
+// vfsMountpoint, when non-empty, is the local directory (a hanzoai/vfs mount;
+// see vfsmount.go) under which DB-backed services keep their SQLite files. It is
+// only applied to a DB-backed service that did not set an explicit database_url,
+// so an operator can always override per service.
+func resolveServices(cfg ServicesConfig, vfsMountpoint string) []resolvedService {
 	if !cfg.Enabled {
 		return nil
 	}
@@ -76,6 +94,14 @@ func resolveServices(cfg ServicesConfig) []resolvedService {
 		}
 		if s.Enabled != nil && !*s.Enabled {
 			continue
+		}
+		// Default a DB-backed service to a SQLite file on the vfs mount when no
+		// explicit url was given. sqlite://<mountpoint>/<name>.db?mode=rwc — the
+		// launcher's initialize_database creates the file (mode=rwc) and skips
+		// the Postgres CREATE DATABASE dance. See database.rs.
+		if s.DatabaseURL == "" && vfsMountpoint != "" && dbBackedServices[s.Name] {
+			s.DatabaseURL = fmt.Sprintf("sqlite://%s?mode=rwc",
+				filepath.Join(vfsMountpoint, s.Name+".db"))
 		}
 		httpPort := s.HTTPPort
 		grpcPort := s.GRPCPort

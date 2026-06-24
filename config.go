@@ -17,6 +17,11 @@ type Config struct {
 	Networks     []Network      `yaml:"networks"`
 	Chains       []ChainConfig  `yaml:"chains"`
 	Services     ServicesConfig `yaml:"services"`
+	// VFS optionally mounts a hanzoai/vfs object-store-backed filesystem under
+	// which DB-backed services keep their SQLite files (see vfsmount.go). Off by
+	// default; when on, DB-backed services without an explicit database_url get
+	// sqlite://<mountpoint>/<svc>.db?mode=rwc.
+	VFS VFSConfig `yaml:"vfs"`
 }
 
 // ServicesConfig configures the in-process Blockscout-rs services that the

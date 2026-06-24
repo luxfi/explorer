@@ -119,11 +119,25 @@ func main() {
 	go registry.hub.Run(ctx)
 	go supervisor.Wait(ctx)
 
+	// Optionally mount a hanzoai/vfs object-store-backed filesystem (s3:// in
+	// prod, file:// for local) under which DB-backed services keep their SQLite
+	// files. Off by default (cfg.VFS.Enabled=false) => empty mountpoint and the
+	// services use whatever database_url the config gives them. See vfsmount.go.
+	vfsMountpoint, vfsCleanup, err := setupVFS(ctx, cfg.VFS, cfg.DataDir)
+	if err != nil {
+		log.Fatalf("[explorer] vfs: %v", err)
+	}
+	defer func() { _ = vfsCleanup() }()
+	if vfsMountpoint != "" {
+		log.Printf("[explorer] vfs: DB-backed services will use SQLite under %s", vfsMountpoint)
+	}
+
 	// Resolve the in-process Blockscout-rs services from config: concrete
 	// ports, URL prefixes, and per-service settings JSON. This is the single
 	// source of truth both the FFI launcher and the zip reverse-proxy read
-	// from (services.go). Empty when services.enabled is false.
-	svcs := resolveServices(cfg.Services)
+	// from (services.go). Empty when services.enabled is false. The vfs
+	// mountpoint (if any) supplies the default SQLite url for DB-backed services.
+	svcs := resolveServices(cfg.Services, vfsMountpoint)
 
 	// In the `-tags ffi` build this launches each resolved service in-process
 	// via cgo on its own Tokio runtime thread — one binary runs everything.

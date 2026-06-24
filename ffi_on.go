@@ -30,6 +30,7 @@ package main
 // Mirrors the C ABI exported by ffi/src/lib.rs. Each starter spawns the named
 // service on its own runtime thread and returns 0 (LUX_FFI_OK) once launched.
 extern int lux_explorer_start_sig_provider(const char* config_json);
+extern int lux_explorer_start_stats(const char* config_json);
 extern int lux_explorer_start_all(void);
 */
 import "C"
@@ -68,9 +69,9 @@ func ffiResult(code C.int) string {
 // of which cargo features were compiled in.
 var ffiStarters = map[string]func(*C.char) C.int{
 	"sig-provider": func(c *C.char) C.int { return C.lux_explorer_start_sig_provider(c) },
+	"stats":        func(c *C.char) C.int { return C.lux_explorer_start_stats(c) },
 	// Scale-out (uncomment as the matching service!{…} is enabled in ffi/):
 	// "smart-contract-verifier": func(c *C.char) C.int { return C.lux_explorer_start_smart_contract_verifier(c) },
-	// "stats":                   func(c *C.char) C.int { return C.lux_explorer_start_stats(c) },
 	// "multichain-aggregator":   func(c *C.char) C.int { return C.lux_explorer_start_multichain_aggregator(c) },
 	// "visualizer":              func(c *C.char) C.int { return C.lux_explorer_start_visualizer(c) },
 }
