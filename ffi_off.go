@@ -13,5 +13,8 @@ package main
 // which variant is running.
 const ffiEnabled = false
 
-// startFFIServices is a no-op in the non-FFI build.
-func startFFIServices(_ map[string]string) {}
+// startFFIServices is a no-op in the non-FFI build: the in-process Rust
+// services are simply not launched, so the front router has nothing local to
+// proxy to. (The proxies are still mounted by main.go when services.enabled is
+// set, and will 502 until a service answers — see services.go.)
+func startFFIServices(_ []resolvedService) {}

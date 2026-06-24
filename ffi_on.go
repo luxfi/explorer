@@ -60,25 +60,43 @@ func ffiResult(code C.int) string {
 	}
 }
 
-// startFFIServices launches the in-process Rust explorer services. configJSON
-// keys the per-service settings (empty => upstream defaults). It is called once
-// from main() at startup in the ffi build; the non-FFI build's stub is a no-op.
+// ffiStarters maps an FFI service name to its C entrypoint. Adding a service
+// is one line here plus its service!{…} block in ffi/src/lib.rs and its
+// dep+feature in ffi/Cargo.toml (see ffi/README.md). Disabled services still
+// export their symbol and return LUX_FFI_ERR_DISABLED, so this table can list
+// every service unconditionally — the Go binary links identically regardless
+// of which cargo features were compiled in.
+var ffiStarters = map[string]func(*C.char) C.int{
+	"sig-provider": func(c *C.char) C.int { return C.lux_explorer_start_sig_provider(c) },
+	// Scale-out (uncomment as the matching service!{…} is enabled in ffi/):
+	// "smart-contract-verifier": func(c *C.char) C.int { return C.lux_explorer_start_smart_contract_verifier(c) },
+	// "stats":                   func(c *C.char) C.int { return C.lux_explorer_start_stats(c) },
+	// "multichain-aggregator":   func(c *C.char) C.int { return C.lux_explorer_start_multichain_aggregator(c) },
+	// "visualizer":              func(c *C.char) C.int { return C.lux_explorer_start_visualizer(c) },
+}
+
+// startFFIServices launches each resolved in-process Rust service by calling
+// its C entrypoint with the settings JSON resolveServices rendered (server
+// addr/port + optional DB url). It is called once from main() at startup in
+// the ffi build; the non-FFI build's stub is a no-op.
 //
 // Each starter returns immediately after spawning the service's worker thread,
-// so this does not block the Go HTTP listener.
-func startFFIServices(configJSON map[string]string) {
-	start := func(name string, fn func(*C.char) C.int) {
-		cfg := configJSON[name]
+// so this does not block the zip HTTP listener.
+func startFFIServices(svcs []resolvedService) {
+	for _, s := range svcs {
+		fn, ok := ffiStarters[s.Name]
+		if !ok {
+			log.Printf("[ffi] no entrypoint for service %q (rebuild ffi with its feature?)", s.Name)
+			continue
+		}
 		var cstr *C.char
-		if cfg != "" {
-			cstr = C.CString(cfg)
-			defer C.free(unsafe.Pointer(cstr))
+		if s.SettingsJSON != "" {
+			cstr = C.CString(s.SettingsJSON)
 		}
 		code := fn(cstr)
-		log.Printf("[ffi] start %s -> %s (%d)", name, ffiResult(code), int(code))
+		if cstr != nil {
+			C.free(unsafe.Pointer(cstr))
+		}
+		log.Printf("[ffi] start %s on :%d -> %s (%d)", s.Name, s.HTTPPort, ffiResult(code), int(code))
 	}
-
-	start("sig-provider", func(c *C.char) C.int { return C.lux_explorer_start_sig_provider(c) })
-	// As services are scaled out in ffi/, add their starters here, e.g.:
-	// start("stats", func(c *C.char) C.int { return C.lux_explorer_start_stats(c) })
 }

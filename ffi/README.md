@@ -105,6 +105,57 @@ Confirmed upstream entrypoints (all take a `serde::Deserialize` `Settings`):
 | multichain-aggregator   | `multichain_aggregator_server`     | `run(Settings)`             |
 | visualizer              | `visualizer_server`                | `run(Settings)`             |
 
-DB-backed services (stats, multichain-aggregator) also need their database URL
-in the config JSON and migrations run — pass that through `startFFIServices`'s
-per-service config map.
+## Front router (zip) — how the binary is fronted
+
+The single binary's **public** listener is [`github.com/hanzoai/zip`](../../../hanzo/hanzoai/zip)
+(Fiber v3 / fasthttp), wired in `front.go`. Each in-process service keeps its
+own HTTP server bound to **loopback** (`127.0.0.1:<port>`, assigned from
+`servicePortBase = 8050`, HTTP=base+2n / gRPC=base+2n+1); zip is the only thing
+exposed. Routing, in registration order:
+
+```
+/api/<prefix>/*   →  httputil.ReverseProxy → http://127.0.0.1:<svc_http_port>   (mountServiceProxies, services.go)
+/*                →  the existing Go-native explorer *http.ServeMux             (zip.AdaptNetHTTP, front.go)
+```
+
+The proxy strips the `/api/<prefix>` mount prefix, so the upstream sees its own
+native path (e.g. `/api/sig/health` → sig-provider `/health`;
+`/api/sig/api/v1/abi/function` → `/api/v1/abi/function`). Enabled services +
+ports are configured under `services:` in chains.yaml
+(`ServicesConfig` → `resolveServices` is the single source of truth both the
+proxy and this FFI launcher read). Default prefixes:
+`sig-provider→sig`, `smart-contract-verifier→verifier`, `stats→stats`,
+`multichain-aggregator→multichain`, `visualizer→visualizer`.
+
+Proven end-to-end (sig-provider, one process owning both :8090 and the service
+port): `curl /api/sig/health → {"status":"SERVING"}`, matching a direct hit on
+the in-process service port.
+
+## Database: SQLite status per service (verified against explorer-rs)
+
+The brief asked to run DB-backed services on **SQLite** if sea-orm allows it
+with minimal effort. It does **not**, here — documented exactly:
+
+| service                 | DB? | SQLite-able? | status   | what it needs |
+|-------------------------|-----|--------------|----------|---------------|
+| sig-provider            | no  | n/a          | **WIRED + PROVEN** | nothing (stateless) |
+| visualizer              | no  | n/a          | ready to wire | nothing (stateless) — clean next target |
+| smart-contract-verifier | no  | n/a          | ready to wire | nothing (stateless) |
+| stats                   | yes | **no**       | disabled | its **own** Postgres + a populated **Blockscout indexer Postgres** to read from |
+| multichain-aggregator   | yes | **no**       | disabled | its own Postgres (+ optional replica) |
+
+Why no SQLite: `blockscout_service_launcher::database` is **Postgres-only** —
+`initialize_postgres::<Migrator>()` pins `sea_orm::DatabaseBackend::Postgres`
+and formats `postgresql://…` DSNs (`libs/blockscout-service-launcher/src/database.rs`
+lines 39/67/294). `stats-server` calls that directly (`server.rs:206 init_stats_db`)
+**and** opens a second connection to a Blockscout indexer DB
+(`server.rs:223 connect_to_indexer_db_common`). Forcing SQLite would mean
+patching the launcher's backend selection + every migration — outside "minimal
+effort" and explicitly a Rust rewrite the brief forbids. So stats /
+multichain-aggregator stay disabled. The Go side already passes a
+`database.url` (with `create_database` + `run_migrations`) through
+`buildSettingsJSON` whenever `ServiceConfig.DatabaseURL` is set, so the day a
+Postgres is provided these turn on with config alone — no code change.
+
+`ServiceConfig.DatabaseURL` in chains.yaml feeds `database.url` in the settings
+JSON `startFFIServices` sends; migrations run when present.

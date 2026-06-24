@@ -262,3 +262,30 @@ chains:
     rpc: ${ATOM_RPC:-https://cosmos-rpc.publicnode.com}
     coin: ATOM
     enabled: false
+
+# In-process Blockscout-rs services (single-binary `-tags ffi` build only).
+# Each runs as a Tokio thread inside the explorer process; the zip front router
+# reverse-proxies /api/<prefix>/* -> http://127.0.0.1:<http_port>. In the
+# default (non-FFI) build this whole block is inert. See ffi/README.md.
+services:
+  enabled: false            # master switch; true only in the `make single` binary
+  list:
+    # sig-provider — stateless 4byte/ABI signature lookup. WIRED + PROVEN.
+    - name: sig-provider
+      prefix: sig           # -> /api/sig/*  (e.g. /api/sig/health, /api/sig/api/v1/abi/function)
+      http_port: 8050       # loopback; gRPC auto = http_port+1
+    # --- ready to wire (stateless, no DB) — add the dep+feature+service! in ffi/ ---
+    # - name: visualizer        # -> /api/visualizer/*
+    #   http_port: 8052
+    # - name: smart-contract-verifier   # -> /api/verifier/*
+    #   http_port: 8054
+    # --- Postgres-only (NOT sqlite-able via blockscout-service-launcher) ---
+    # stats + multichain-aggregator need a real Postgres (stats also needs a
+    # populated Blockscout indexer Postgres to read). Set database_url to a
+    # postgresql:// DSN to enable; migrations run automatically.
+    # - name: stats
+    #   http_port: 8056
+    #   database_url: ${STATS_DB:-postgresql://localhost/stats}
+    # - name: multichain-aggregator
+    #   http_port: 8058
+    #   database_url: ${MULTICHAIN_DB:-postgresql://localhost/multichain}

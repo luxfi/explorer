@@ -10,12 +10,56 @@ import (
 
 // Config is the top-level explorer configuration loaded from chains.yaml.
 type Config struct {
-	DataDir      string        `yaml:"data_dir"`
-	HTTPAddr     string        `yaml:"http_addr"`
-	StaticDir    string        `yaml:"static_dir"` // overlay dir for SPA; empty = embedded only
-	BrandDefault Brand         `yaml:"brand_default"`
-	Networks     []Network     `yaml:"networks"`
-	Chains       []ChainConfig `yaml:"chains"`
+	DataDir      string         `yaml:"data_dir"`
+	HTTPAddr     string         `yaml:"http_addr"`
+	StaticDir    string         `yaml:"static_dir"` // overlay dir for SPA; empty = embedded only
+	BrandDefault Brand          `yaml:"brand_default"`
+	Networks     []Network      `yaml:"networks"`
+	Chains       []ChainConfig  `yaml:"chains"`
+	Services     ServicesConfig `yaml:"services"`
+}
+
+// ServicesConfig configures the in-process Blockscout-rs services that the
+// `-tags ffi` build runs as goroutine-driven Tokio threads inside this one
+// binary. The zip front router reverse-proxies each enabled service under
+// /api/<prefix>/* → http://127.0.0.1:<port>. In the default (non-FFI) build
+// nothing is launched and these proxies are not mounted (see services.go).
+type ServicesConfig struct {
+	// Enabled is the master switch. When false (default) no in-process
+	// service is started and no proxy is mounted — the explorer is exactly
+	// the Go-native binary it has always been.
+	Enabled bool `yaml:"enabled"`
+	// Services lists each in-process service. Order is irrelevant; the
+	// reverse-proxy prefix is derived from Prefix (default = Name).
+	Services []ServiceConfig `yaml:"list"`
+}
+
+// ServiceConfig is one in-process Blockscout-rs service.
+type ServiceConfig struct {
+	// Name is the FFI service key (e.g. "sig-provider", "stats"). It selects
+	// which lux_explorer_start_<name> entrypoint runs and keys the settings
+	// passed to it.
+	Name string `yaml:"name"`
+	// Prefix is the URL path segment the front router proxies under
+	// (/api/<prefix>/*). Empty => derived from Name (sig-provider => "sig").
+	Prefix string `yaml:"prefix"`
+	// HTTPPort is the localhost port the service's own HTTP server binds.
+	// Empty => a default is assigned per service (see servicePort).
+	HTTPPort int `yaml:"http_port"`
+	// GRPCPort is the localhost port for the service's gRPC server (the
+	// launcher always binds one; we give it a distinct port to avoid
+	// collisions). Empty => HTTPPort+1.
+	GRPCPort int `yaml:"grpc_port"`
+	// DatabaseURL is the sea-orm connection string for DB-backed services
+	// (stats, multichain-aggregator). A sqlite URL keeps the single binary
+	// self-contained. Empty for stateless services (sig-provider, visualizer,
+	// smart-contract-verifier).
+	DatabaseURL string `yaml:"database_url"`
+	// Enabled toggles this individual service. Default true when listed.
+	Enabled *bool `yaml:"enabled"`
+	// Settings is an optional raw settings overlay merged into the JSON sent
+	// to the service (service-specific keys beyond addr/db).
+	Settings map[string]any `yaml:"settings"`
 }
 
 // ChainConfig defines a single chain plus per-chain customization. The

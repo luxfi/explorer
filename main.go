@@ -119,15 +119,19 @@ func main() {
 	go registry.hub.Run(ctx)
 	go supervisor.Wait(ctx)
 
-	// In the `-tags ffi` build this launches the Blockscout-rs explorer
-	// services (sig-provider, …) in-process via cgo on their own Tokio
-	// runtime threads — one binary runs everything. In the default build
-	// startFFIServices is a no-op (see ffi_off.go). Per-service settings are
-	// keyed by service name; empty => the service's upstream defaults / env.
-	if ffiEnabled {
-		log.Printf("[explorer] ffi: starting in-process Rust services")
+	// Resolve the in-process Blockscout-rs services from config: concrete
+	// ports, URL prefixes, and per-service settings JSON. This is the single
+	// source of truth both the FFI launcher and the zip reverse-proxy read
+	// from (services.go). Empty when services.enabled is false.
+	svcs := resolveServices(cfg.Services)
+
+	// In the `-tags ffi` build this launches each resolved service in-process
+	// via cgo on its own Tokio runtime thread — one binary runs everything.
+	// In the default build startFFIServices is a no-op (see ffi_off.go).
+	if ffiEnabled && len(svcs) > 0 {
+		log.Printf("[explorer] ffi: starting %d in-process Rust service(s)", len(svcs))
 	}
-	startFFIServices(map[string]string{})
+	startFFIServices(svcs)
 
 	frontend, err := NewFrontend(cfg, registry)
 	if err != nil {
@@ -188,37 +192,26 @@ func main() {
 	supervisor.MountRoutes(mux)
 	frontend.Mount(mux)
 
-	log.Printf("[explorer] %s listening %s data=%s chains=%d mdns=%v %s",
-		version, cfg.HTTPAddr, cfg.DataDir, registry.Count(), *enableMDNS, fingerprint())
+	// zip is the FRONT router (front.go): it reverse-proxies /api/<prefix>/*
+	// to each in-process service and serves everything else from the explorer
+	// mux built above. When no services are configured the front app is just
+	// the mux behind zip's security middleware — identical behaviour, one
+	// router.
+	app := buildFrontApp(mux, svcs)
 
-	server := &http.Server{Addr: cfg.HTTPAddr, Handler: withSecurity(mux)}
+	log.Printf("[explorer] %s listening %s data=%s chains=%d services=%d mdns=%v %s",
+		version, cfg.HTTPAddr, cfg.DataDir, registry.Count(), len(svcs), *enableMDNS, fingerprint())
+
 	go func() {
-		if err := server.ListenAndServe(); err != nil && err != http.ErrServerClosed {
+		if err := app.Listen(cfg.HTTPAddr); err != nil {
 			log.Fatalf("[explorer] server: %v", err)
 		}
 	}()
 	<-ctx.Done()
 	shutCtx, shutCancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer shutCancel()
-	server.Shutdown(shutCtx)
+	_ = app.ShutdownWithContext(shutCtx)
 	log.Println("[explorer] stopped")
-}
-
-// withSecurity adds the baseline security headers and CORS preflight handler.
-func withSecurity(next http.Handler) http.Handler {
-	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("X-Content-Type-Options", "nosniff")
-		w.Header().Set("X-Frame-Options", "DENY")
-		w.Header().Set("Referrer-Policy", "strict-origin-when-cross-origin")
-		w.Header().Set("Access-Control-Allow-Origin", "*")
-		w.Header().Set("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS")
-		w.Header().Set("Access-Control-Allow-Headers", "Content-Type, Authorization")
-		if r.Method == http.MethodOptions {
-			w.WriteHeader(http.StatusNoContent)
-			return
-		}
-		next.ServeHTTP(w, r)
-	})
 }
 
 func env(key, fallback string) string {

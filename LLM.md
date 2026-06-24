@@ -51,6 +51,34 @@ explorer Deployment.
 
 Per env: 1 Pod, 2 containers, 1 Service exposing `:80 / :8090 / :3000`.
 
+## Single-binary mode — zip front + Blockscout-rs in-process (cgo FFI)
+
+The explorer can be built as ONE Go binary that runs the Blockscout-rs Rust
+services IN-PROCESS (each a Tokio thread, no subprocess) and reverse-proxies to
+them through `github.com/hanzoai/zip` (Fiber v3 / fasthttp) as the front router.
+LEAST-WORK: the Rust services are NOT rewritten/ported — their real entrypoints
+run via the `ffi/` staticlib (`lux_explorer_ffi`, crate-type staticlib) over
+cgo, keeping their own HTTP servers on loopback.
+
+- **Build:** `make single` (default `make build` / `go build ./...` is the
+  Go-native binary, no cgo — `ffi_off.go` stub). Scope services with
+  `make single FFI_FEATURES=sig-provider,visualizer`.
+- **Front router (`front.go`):** zip owns the public listener. Routes, in order:
+  `/api/<prefix>/*` → `httputil.ReverseProxy` → `127.0.0.1:<svc_port>`
+  (prefix stripped); `/*` → the existing net/http explorer mux via
+  `zip.AdaptNetHTTP`. Security headers + CORS are zip middleware.
+- **Config (`services:` in chains.yaml, `ServicesConfig`/`resolveServices`):**
+  one source of truth for enabled services, loopback ports (base 8050,
+  HTTP=base+2n/gRPC=+1), prefixes, and per-service settings JSON. The FFI
+  launcher (`ffi_on.go startFFIServices`) and the proxy both read it.
+- **Status:** sig-provider WIRED + PROVEN end-to-end (one process owns :8090
+  and :8050; `curl /api/sig/health → {"status":"SERVING"}`). visualizer +
+  smart-contract-verifier are stateless and ready to wire (recipe in
+  `ffi/README.md`). stats + multichain-aggregator stay DISABLED:
+  `blockscout-service-launcher` DB layer is Postgres-only (no SQLite without a
+  Rust rewrite), and stats also needs a populated Blockscout indexer Postgres.
+  See `ffi/README.md` for the per-service table + exact code citations.
+
 Manifests:
   ~/work/lux/universe/k8s/lux-mainnet/explorer.yaml
   ~/work/lux/universe/k8s/lux-mainnet/explore-ingress.yaml
