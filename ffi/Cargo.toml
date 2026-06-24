@@ -57,16 +57,42 @@ sig-provider-server = { path = "../../explorer-rs/sig-provider/sig-provider-serv
 # pulled as a path dep (does not share the 0.21 launcher graph).
 stats-server = { path = "../../explorer-rs/stats/stats-server", optional = true }
 
+# multichain-aggregator: DB-backed. Its sea-orm MIGRATIONS are ported + PROVEN on
+# SQLite (multichain-aggregator-migration/tests/sqlite_migration.rs — green), and
+# the FFI scaffold here is complete: the `service!` block + the Go extern + the
+# ffiStarters entry are wired so that the moment the server compiles, it runs
+# in-process and the zip front already routes /v1/multichain/* to it (services.go
+# has it in defaultPrefix + dbBackedServices, proven by
+# TestResolveServicesStampsSQLiteUrlOnVFSMount). Its entrypoint is
+# `multichain_aggregator_server::run(Settings)`.
+#
+# It is OPTIONAL and NOT in `all` because the SERVER has TWO upstream-dep blockers
+# (neither is the single-binary architecture, both are documented follow-ups):
+#   1. CO-LINK: it pins blockscout-service-launcher 0.21 / tonic 0.14 / prost 0.14
+#      — INCOMPATIBLE majors with stats' 0.19 / 0.12 / 0.13, so the two proto
+#      build graphs can't resolve in one staticlib (same skew that keeps
+#      sig-provider separate).
+#   2. STANDALONE: even alone (`cargo build --features multichain-aggregator`) it
+#      currently fails to compile in a transitive dep — `api-client-framework`
+#      hits a `reqwest-middleware 0.4.2` Middleware trait-bound mismatch. That is
+#      a version skew INSIDE multichain-server's own graph, upstream of this crate.
+# Because disabled services still export their symbol (LUX_FFI_ERR_DISABLED), the
+# default `stats` build links the multichain entrypoint as a STUB — the Go binary
+# is byte-identical whether or not this feature compiles. When both upstream deps
+# are reconciled, flip it on with `make FFI_FEATURES=multichain-aggregator` (alone)
+# and it goes live with zero Go-side changes.
+multichain-aggregator-server = { path = "../../explorer-rs/multichain-aggregator/multichain-aggregator-server", optional = true }
+
 # The remaining services are listed (commented) with their exact paths so
 # scaling out is mechanical. They are NOT enabled by default because each pins a
-# DIFFERENT major of blockscout-service-launcher (0.13/0.17/0.19/0.21) and pulls
-# DB/migration stacks (sea-orm) — combining all of them inflates build time and
-# must be done one at a time, verifying the link after each. See README.md
-# "Scaling out" for the exact recipe.
+# DIFFERENT major of blockscout-service-launcher (0.10/0.13/0.17/0.19/0.21) and
+# pulls DB/migration stacks (sea-orm) — combining incompatible majors fails to
+# build, so enable one at a time and verify the link. See README.md "Scaling
+# out" for the exact recipe.
 #
+# sig-provider pins launcher 0.10 / tonic 0.8 — also its own staticlib.
+# sig-provider-server              = { path = "../../explorer-rs/sig-provider/sig-provider-server", optional = true }  (declared above)
 # smart-contract-verifier-server   = { path = "../../explorer-rs/smart-contract-verifier/smart-contract-verifier-server", optional = true }
-# stats-server                     = { path = "../../explorer-rs/stats/stats-server", optional = true }
-# multichain-aggregator-server     = { path = "../../explorer-rs/multichain-aggregator/multichain-aggregator-server", optional = true }
 # visualizer-server                = { path = "../../explorer-rs/visualizer/visualizer-server", optional = true }
 
 [features]
@@ -78,12 +104,17 @@ sig-provider = ["dep:sig-provider-server"]
 # stats is DB-backed: pull the bundled SQLCipher so its sqlx-sqlite links the
 # single in-staticlib C SQLite (see the libsqlite3-sys dep note above).
 stats = ["dep:stats-server", "dep:libsqlite3-sys"]
+# multichain-aggregator is DB-backed too (same bundled-SQLCipher). Build it ALONE
+# (`make FFI_FEATURES=multichain-aggregator`); it is NOT in `all` because its
+# launcher/tonic/prost majors are incompatible with stats (see the dep note).
+multichain-aggregator = ["dep:multichain-aggregator-server", "dep:libsqlite3-sys"]
 # smart-contract-verifier = ["dep:smart-contract-verifier-server"]
-# multichain-aggregator = ["dep:multichain-aggregator-server"]
 # visualizer = ["dep:visualizer-server"]
 
-# Convenience: every wired service at once.
-all = ["sig-provider", "stats"]
+# Convenience: every CO-LINKABLE service at once. stats is the DB-backed default;
+# multichain-aggregator and sig-provider each pin incompatible launcher/tonic
+# majors, so they are built alone (FFI_FEATURES=<svc>), not bundled here.
+all = ["stats"]
 
 [profile.release]
 # Smaller, faster-linking staticlib. LTO off keeps incremental builds sane while

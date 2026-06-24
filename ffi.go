@@ -56,8 +56,12 @@ package main
 
 // Mirrors the C ABI exported by ffi/src/lib.rs. Each starter spawns the named
 // service on its own runtime thread and returns 0 (LUX_FFI_OK) once launched.
+// EVERY service! entry is exported by the staticlib regardless of which cargo
+// features were compiled in (disabled ones return LUX_FFI_ERR_DISABLED), so the
+// Go binary links identically no matter the FFI_FEATURES — declare them all.
 extern int lux_explorer_start_stats(const char* config_json);
 extern int lux_explorer_start_sig_provider(const char* config_json);
+extern int lux_explorer_start_multichain_aggregator(const char* config_json);
 extern int lux_explorer_start_all(void);
 */
 import "C"
@@ -92,11 +96,11 @@ func ffiResult(code C.int) string {
 // every service unconditionally — the binary links identically regardless of
 // which cargo features were compiled into the staticlib.
 var ffiStarters = map[string]func(*C.char) C.int{
-	"stats":        func(c *C.char) C.int { return C.lux_explorer_start_stats(c) },
-	"sig-provider": func(c *C.char) C.int { return C.lux_explorer_start_sig_provider(c) },
+	"stats":                 func(c *C.char) C.int { return C.lux_explorer_start_stats(c) },
+	"sig-provider":          func(c *C.char) C.int { return C.lux_explorer_start_sig_provider(c) },
+	"multichain-aggregator": func(c *C.char) C.int { return C.lux_explorer_start_multichain_aggregator(c) },
 	// Scale-out (uncomment as the matching service!{…} is enabled in ffi/):
 	// "smart-contract-verifier": func(c *C.char) C.int { return C.lux_explorer_start_smart_contract_verifier(c) },
-	// "multichain-aggregator":   func(c *C.char) C.int { return C.lux_explorer_start_multichain_aggregator(c) },
 	// "visualizer":              func(c *C.char) C.int { return C.lux_explorer_start_visualizer(c) },
 }
 

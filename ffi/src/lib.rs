@@ -173,6 +173,25 @@ service!(
     run = |s| stats_server::stats(s, None),
 );
 
+// multichain-aggregator — DB-backed, runs on SQLite (bundled SQLCipher) via the
+// same launcher initialize_database path as stats; its migrations are ported +
+// proven on SQLite (multichain-aggregator-migration/tests/sqlite_migration.rs).
+// The entrypoint is `run(Settings)`. NOTE: the SERVER has two upstream-dep
+// blockers (see ffi/Cargo.toml's dep note): it pins launcher 0.21 / tonic 0.14,
+// incompatible with stats' 0.19 / 0.12 (can't co-link), AND it currently fails to
+// compile standalone in a transitive dep (api-client-framework vs reqwest-
+// middleware 0.4.2). With the feature OFF (the default `stats` build) this still
+// exports the symbol and returns LUX_FFI_ERR_DISABLED, so the Go side links
+// unchanged — the wiring is a complete, byte-identical stub until those deps are
+// reconciled, then it goes live with no Go-side change.
+service!(
+    fn_name = lux_explorer_start_multichain_aggregator,
+    name = "multichain-aggregator",
+    feature = "multichain-aggregator",
+    settings = multichain_aggregator_server::Settings,
+    run = |s| multichain_aggregator_server::run(s),
+);
+
 // --- Scale-out (uncomment the dep+feature in Cargo.toml, then this block) ---
 //
 // service!(
@@ -181,14 +200,6 @@ service!(
 //     feature = "smart-contract-verifier",
 //     settings = smart_contract_verifier_server::Settings,
 //     run = |s| smart_contract_verifier_server::run(s),
-// );
-//
-// service!(
-//     fn_name = lux_explorer_start_multichain_aggregator,
-//     name = "multichain-aggregator",
-//     feature = "multichain-aggregator",
-//     settings = multichain_aggregator_server::Settings,
-//     run = |s| multichain_aggregator_server::run(s),
 // );
 //
 // service!(
@@ -210,9 +221,9 @@ pub extern "C" fn lux_explorer_start_all() -> i32 {
     let mut rc = LUX_FFI_OK;
     rc |= lux_explorer_start_sig_provider(empty);
     rc |= lux_explorer_start_stats(empty);
+    rc |= lux_explorer_start_multichain_aggregator(empty);
     // Mirror each service! entry here as it is enabled:
     // rc |= lux_explorer_start_smart_contract_verifier(empty);
-    // rc |= lux_explorer_start_multichain_aggregator(empty);
     // rc |= lux_explorer_start_visualizer(empty);
     rc
 }
