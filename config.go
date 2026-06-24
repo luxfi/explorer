@@ -62,8 +62,15 @@ type ServiceConfig struct {
 	DatabaseURL string `yaml:"database_url"`
 	// Enabled toggles this individual service. Default true when listed.
 	Enabled *bool `yaml:"enabled"`
-	// Settings is an optional raw settings overlay merged into the JSON sent
-	// to the service (service-specific keys beyond addr/db).
+	// ConfigDir is a directory holding a DB-backed service's config files
+	// (stats reads charts.json / layout.json / update_groups.json from here).
+	// Empty => the service's own upstream defaults (relative to CWD). Set it to
+	// an absolute path so the in-process service finds its config regardless of
+	// the explorer's working directory.
+	ConfigDir string `yaml:"config_dir"`
+	// Settings is an optional raw settings overlay merged LAST into the JSON sent
+	// to the service (service-specific keys), so an operator can override any
+	// derived field.
 	Settings map[string]any `yaml:"settings"`
 }
 

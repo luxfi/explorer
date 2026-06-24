@@ -11,9 +11,10 @@ require (
 	github.com/luxfi/indexer v1.4.6
 	github.com/luxfi/log v1.4.3
 	github.com/luxfi/mdns v0.1.1
-	github.com/mattn/go-sqlite3 v2.0.3+incompatible
 	gopkg.in/yaml.v3 v3.0.1
 )
+
+require github.com/mattn/go-sqlite3 v2.0.3+incompatible // indirect
 
 require (
 	bazil.org/fuse v0.0.0-20230120002735-62a210ff1fd5 // indirect
@@ -60,7 +61,6 @@ require (
 	github.com/hanzoai/ltx v0.5.1 // indirect
 	github.com/hanzoai/lz4/v4 v4.1.22 // indirect
 	github.com/hanzoai/replicate v0.7.2 // indirect
-	github.com/hanzoai/sqlite v0.0.0
 	github.com/hashicorp/golang-lru/v2 v2.0.7 // indirect
 	github.com/jacobsa/fuse v0.0.0-20260302145937-f1ba38d60fdf // indirect
 	github.com/jalaali/go-jalaali v0.0.0-20250521085720-bf793ab67800 // indirect
@@ -129,7 +129,7 @@ require (
 	modernc.org/libc v1.72.5 // indirect
 	modernc.org/mathutil v1.7.1 // indirect
 	modernc.org/memory v1.11.0 // indirect
-	modernc.org/sqlite v1.51.0 // indirect
+	modernc.org/sqlite v1.51.0
 )
 
 replace github.com/hanzoai/zip => ../../../hanzo/hanzoai/zip
@@ -140,3 +140,18 @@ replace github.com/hanzoai/zip => ../../../hanzo/hanzoai/zip
 replace github.com/hanzoai/vfs => ../../../hanzo/hanzoai/vfs
 
 replace github.com/hanzoai/sqlite => ../../../hanzo/hanzoai/sqlite
+
+// luxfi/age v1.5.0 was re-tagged upstream after this go.sum was written (the
+// recorded h1: no longer matches the proxy's bits — a SECURITY ERROR that
+// blocks every build). Build against the sibling clone, the source of truth,
+// matching the workspace convention for the other unpublished deps above.
+replace github.com/luxfi/age => ../age
+
+// luxfi/indexer + luxfi/graph transitively require mattn/go-sqlite3
+// v2.0.3+incompatible — a mis-tagged ancient commit (mattn never shipped a real
+// v2; the "+incompatible" has no go.mod) that fails to compile under
+// `-tags libsqlite3` (`C.sqlite3` undefined). hanzoai/sqlite — the canonical
+// driver — pins the real, current v1.14.47, which builds correctly against the
+// staticlib's bundled SQLCipher. Pin the whole graph to it so MVS can't pick the
+// broken v2.0.3. (hanzoai/sqlite is tested against v1.14.47.)
+replace github.com/mattn/go-sqlite3 => github.com/mattn/go-sqlite3 v1.14.47

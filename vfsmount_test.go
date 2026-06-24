@@ -27,7 +27,12 @@ import (
 	"strings"
 	"testing"
 
-	_ "github.com/mattn/go-sqlite3"
+	// "sqlite" database/sql driver for this test's sql.Open("sqlite", …). The
+	// binary registers exactly one "sqlite" driver: modernc.org/sqlite (pure Go),
+	// pulled transitively by luxfi/graph's replicate; mattn/go-sqlite3 owns the
+	// cgo "sqlite3" name. Registering a second "sqlite" (e.g. a cgo driver) would
+	// panic at init, so the test uses the same modernc driver the binary does.
+	_ "modernc.org/sqlite"
 )
 
 func TestSetupVFSFileBackendYieldsUsableSQLitePath(t *testing.T) {
@@ -62,7 +67,7 @@ func TestSetupVFSFileBackendYieldsUsableSQLitePath(t *testing.T) {
 	// way the explorer writes the same path, which is what we assert.
 	dbPath := filepath.Join(mountpoint, "stats.db")
 	dsn := "file:" + dbPath + "?mode=rwc"
-	db, err := sql.Open("sqlite3", dsn)
+	db, err := sql.Open("sqlite", dsn)
 	if err != nil {
 		t.Fatalf("sql.Open: %v", err)
 	}
@@ -156,14 +161,9 @@ func extractDBURL(t *testing.T, settingsJSON string) string {
 	if err := json.Unmarshal([]byte(settingsJSON), &m); err != nil {
 		t.Fatalf("unmarshal settings: %v", err)
 	}
-	dbAny, ok := m["database"]
-	if !ok {
-		return ""
-	}
-	dbMap, ok := dbAny.(map[string]any)
-	if !ok {
-		return ""
-	}
-	u, _ := dbMap["url"].(string)
+	// stats' Settings reads a FLAT `db_url` (deny_unknown_fields), not a nested
+	// `database.url` — see services.go addServiceSettings and the stats server's
+	// settings.db_url. The single binary boots on exactly this key.
+	u, _ := m["db_url"].(string)
 	return u
 }

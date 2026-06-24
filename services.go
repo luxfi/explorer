@@ -137,10 +137,15 @@ func resolveServices(cfg ServicesConfig, vfsMountpoint string) []resolvedService
 
 // buildSettingsJSON renders the JSON the service's upstream `Settings`
 // deserializes. Every wrapped service is launcher-based and shares the
-// `server.http.addr` / `server.grpc.addr` shape; DB-backed services also take
-// `database.url`. We bind every service to 127.0.0.1 (loopback) so the zip
-// front router is the only thing exposed. Service-specific overrides from
-// ServiceConfig.Settings are merged last so they win.
+// `server.http.addr` / `server.grpc.addr` shape; we bind every service to
+// 127.0.0.1 (loopback) so the zip front router is the only thing exposed.
+//
+// DB-backed services (stats) read their connection + behaviour as FLAT
+// top-level keys (`db_url`, `run_migrations`, `create_database`), NOT a nested
+// `database` object — and their `Settings` are `deny_unknown_fields`, so an
+// unknown key fails the parse. dbSettings() adds exactly the flat keys the
+// service expects. Service-specific overrides from ServiceConfig.Settings are
+// merged LAST so an operator can override any derived field.
 func buildSettingsJSON(s ServiceConfig, httpPort, grpcPort int) string {
 	m := map[string]any{
 		"server": map[string]any{
@@ -152,7 +157,7 @@ func buildSettingsJSON(s ServiceConfig, httpPort, grpcPort int) string {
 				// gRPC stays enabled but on loopback; the front router only
 				// proxies HTTP. Disabling it entirely is service-dependent, so
 				// we just bind it somewhere harmless.
-				"enabled": true,
+				"enabled": false,
 				"addr":    fmt.Sprintf("127.0.0.1:%d", grpcPort),
 			},
 		},
@@ -163,15 +168,7 @@ func buildSettingsJSON(s ServiceConfig, httpPort, grpcPort int) string {
 			"addr":    fmt.Sprintf("127.0.0.1:%d", grpcPort+1),
 		},
 	}
-	if s.DatabaseURL != "" {
-		// sea-orm services (stats, multichain-aggregator) read database.url.
-		// A sqlite URL (sqlite:///path?mode=rwc) keeps the binary self-contained.
-		m["database"] = map[string]any{
-			"url":             s.DatabaseURL,
-			"create_database": true,
-			"run_migrations":  true,
-		}
-	}
+	addServiceSettings(m, s)
 	for k, v := range s.Settings {
 		m[k] = v
 	}
@@ -182,6 +179,36 @@ func buildSettingsJSON(s ServiceConfig, httpPort, grpcPort int) string {
 		return "{}"
 	}
 	return string(b)
+}
+
+// addServiceSettings stamps the service-specific top-level keys onto the
+// settings map. Today only stats is wired; its Settings are flat and
+// deny_unknown_fields, so we emit exactly what it reads:
+//   - `db_url` / `create_database` / `run_migrations` (the SQLite DB on the vfs
+//     mount; migrations are ported to SQLite so run_migrations is safe on).
+//   - `ignore_blockscout_api_absence: true` so stats boots without a Blockscout
+//     API url (the single binary has none — charts that need it are skipped).
+//   - `charts_config` / `layout_config` / `update_groups_config` pointing at the
+//     service's ConfigDir (absolute) so it finds them regardless of the
+//     explorer's CWD. Omitted when ConfigDir is empty (service uses its own
+//     relative defaults).
+func addServiceSettings(m map[string]any, s ServiceConfig) {
+	if !dbBackedServices[s.Name] {
+		return
+	}
+	if s.DatabaseURL != "" {
+		m["db_url"] = s.DatabaseURL
+		m["create_database"] = true
+		m["run_migrations"] = true
+	}
+	// stats requires a Blockscout API only for a subset of charts; without one
+	// it must be told to proceed rather than hard-fail at boot.
+	m["ignore_blockscout_api_absence"] = true
+	if s.ConfigDir != "" {
+		m["charts_config"] = filepath.Join(s.ConfigDir, "charts.json")
+		m["layout_config"] = filepath.Join(s.ConfigDir, "layout.json")
+		m["update_groups_config"] = filepath.Join(s.ConfigDir, "update_groups.json")
+	}
 }
 
 // mountServiceProxies registers a reverse-proxy on the zip front App for each

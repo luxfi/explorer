@@ -23,6 +23,16 @@ once_cell = "1"
 anyhow = "1"
 tokio = { version = "1", features = ["rt-multi-thread"] }
 
+# The ONE C-SQLite for the whole single binary. DB-backed services (stats,
+# multichain) pull sqlx-sqlite -> libsqlite3-sys; `bundled-sqlcipher` compiles a
+# single full SQLCipher amalgamation INTO this staticlib (unlock_notify +
+# load_extension + the SQLCipher codec, CommonCrypto on Apple — no OpenSSL). The
+# Go side's mattn/go-sqlite3 is built `-tags "libsqlite3 sqlite_unlock_notify"`
+# so it REFERENCES these symbols instead of bundling a second copy => zero
+# duplicate `_sqlite3_*` symbols when cgo links the .a. Activated only by the
+# DB-backed features (a pure sig-provider build never compiles it).
+libsqlite3-sys = { version = "0.30", features = ["bundled-sqlcipher", "unlock_notify"], optional = true }
+
 # --- Wrapped services (path deps into the sibling explorer-rs checkout) -------
 # explorer-rs lives at ../../explorer-rs relative to this crate
 # (/Users/a/work/lux/explorer/ffi -> /Users/a/work/lux/luxfi/explorer-rs).
@@ -65,7 +75,9 @@ stats-server = { path = "../../explorer-rs/stats/stats-server", optional = true 
 # gracefully. `make single` turns on the services it wants.
 default = []
 sig-provider = ["dep:sig-provider-server"]
-stats = ["dep:stats-server"]
+# stats is DB-backed: pull the bundled SQLCipher so its sqlx-sqlite links the
+# single in-staticlib C SQLite (see the libsqlite3-sys dep note above).
+stats = ["dep:stats-server", "dep:libsqlite3-sys"]
 # smart-contract-verifier = ["dep:smart-contract-verifier-server"]
 # multichain-aggregator = ["dep:multichain-aggregator-server"]
 # visualizer = ["dep:visualizer-server"]

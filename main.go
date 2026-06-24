@@ -139,10 +139,10 @@ func main() {
 	// mountpoint (if any) supplies the default SQLite url for DB-backed services.
 	svcs := resolveServices(cfg.Services, vfsMountpoint)
 
-	// In the `-tags ffi` build this launches each resolved service in-process
-	// via cgo on its own Tokio runtime thread — one binary runs everything.
-	// In the default build startFFIServices is a no-op (see ffi_off.go).
-	if ffiEnabled && len(svcs) > 0 {
+	// Launch each resolved service in-process via cgo on its own Tokio runtime
+	// thread — one binary runs everything (ffi.go). The zip front router
+	// reverse-proxies /v1/<prefix>/* to them.
+	if len(svcs) > 0 {
 		log.Printf("[explorer] ffi: starting %d in-process Rust service(s)", len(svcs))
 	}
 	startFFIServices(svcs)

@@ -13,8 +13,6 @@ import (
 	"sync"
 	"time"
 
-	_ "github.com/hanzoai/sqlite"
-
 	"github.com/luxfi/graph/engine"
 	graphidx "github.com/luxfi/graph/indexer"
 	graphstor "github.com/luxfi/graph/storage"
@@ -249,7 +247,12 @@ func (s *ChainSupervisor) mountIndexerAPI(ctx context.Context, cfg ChainConfig, 
 			continue
 		}
 		if cfg.Type == "" || cfg.Type == "evm" {
-			db, err := sql.Open("sqlite", "file:"+dbPath+"?mode=ro")
+			// Read the chain DB with the SAME engine that wrote it: luxfi/indexer
+			// + luxfi/graph open "sqlite3" (mattn/go-sqlite3, built `-tags
+			// libsqlite3` against the staticlib's bundled SQLCipher). The name
+			// "sqlite" is owned by hanzoai/replicate's modernc driver (graph's DR
+			// path), so it must not be used here — one driver name per engine.
+			db, err := sql.Open("sqlite3", "file:"+dbPath+"?mode=ro")
 			if err == nil {
 				var n int
 				_ = db.QueryRow("SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name='evm_blocks'").Scan(&n)
