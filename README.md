@@ -1,3 +1,5 @@
+<p align="center"><img src=".github/hero.svg" alt="explorer" width="880"></p>
+
 # Explorer
 
 Single-binary Lux explorer: chain indexer, GraphQL engine, and SPA frontend
