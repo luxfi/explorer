@@ -114,7 +114,7 @@ func (r *ChainRegistry) probeNode(host string, port int, brand string) {
 		r.Add(ChainConfig{
 			Slug:    slug,
 			Name:    name,
-			RPC:     fmt.Sprintf("%s/ext/bc/%s/rpc", base, id),
+			RPC:     fmt.Sprintf("%s/v1/bc/%s/rpc", base, id),
 			Type:    chainType,
 			Source:  "mdns",
 			Default: isDefault,
@@ -126,7 +126,7 @@ func (r *ChainRegistry) probeNode(host string, port int, brand string) {
 // probeNodeLegacy uses platform.getBlockchains + per-chain RPC probe for older nodes
 // that don't support info.getChains.
 func (r *ChainRegistry) probeNodeLegacy(base, brand string) {
-	chains, err := rpcCall(base+"/ext/bc/P", "platform.getBlockchains", nil)
+	chains, err := rpcCall(base+"/v1/bc/P", "platform.getBlockchains", nil)
 	if err != nil {
 		log.Printf("[mdns] %s: cannot query platform either, giving up", base)
 		return
@@ -149,7 +149,7 @@ func (r *ChainRegistry) probeNodeLegacy(base, brand string) {
 			continue
 		}
 
-		rpcURL := fmt.Sprintf("%s/ext/bc/%s/rpc", base, id)
+		rpcURL := fmt.Sprintf("%s/v1/bc/%s/rpc", base, id)
 		if !probeRPC(rpcURL) {
 			continue
 		}
