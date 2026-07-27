@@ -356,6 +356,9 @@ func (s *ChainSupervisor) mountIndexerAPI(ctx context.Context, cfg ChainConfig, 
 			ChainName:     cfg.Name,
 			CoinSymbol:    cfg.CoinSymbol,
 			APIPrefix:     apiPrefix,
+			// Native-coin balances come from the chain, not from the
+			// index — the same RPC this chain is indexed from.
+			RPCEndpoint: cfg.RPC,
 		})
 		if err != nil {
 			if time.Now().After(deadline) {

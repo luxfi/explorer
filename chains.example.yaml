@@ -19,16 +19,18 @@ brand_default:
   logo_url: /logo.svg
 
 # Cross-explorer link list rendered in the SPA's network switcher.
+# `domain` is derived from the request host at serve time (see
+# networkSwitcher in frontend.go) — do not write it here. A hand-kept copy
+# of a hostname is a second source of truth, and this one had drifted to
+# testnet.explorer.lux.network / devnet.explorer.lux.network, neither of
+# which resolves. Config supplies what only config knows: label + chain ID.
 networks:
   - label: Mainnet
-    domain: explorer.lux.network
     chain_id: 96369
   - label: Testnet
-    domain: testnet.explorer.lux.network
     chain_id: 96368
   - label: Devnet
-    domain: devnet.explorer.lux.network
-    chain_id: 96370
+    chain_id: 96367
 
 chains:
   # ── Lux native chains ─────────────────────────────────────────
