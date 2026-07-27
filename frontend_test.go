@@ -284,3 +284,45 @@ func TestChainSlugForHost(t *testing.T) {
 		})
 	}
 }
+
+// The switcher's domains are derived from the request host, never from a
+// hand-written config field. Config once carried its own copy and it had
+// drifted to testnet.explore.lux.network / devnet.explore.lux.network —
+// neither of which resolves — so the network switcher on a live explorer
+// linked to nothing.
+func TestNetworkSwitcherDerivesDomains(t *testing.T) {
+	cfg := Config{
+		BrandDefault: Brand{Name: "Lux Explorer"},
+		Chains:       []ChainConfig{{Slug: "cchain"}},
+		Networks: []Network{
+			{Label: "Mainnet", Domain: "stale.example", ChainID: 96369},
+			{Label: "Testnet", Domain: "testnet.explore.lux.network", ChainID: 96368},
+			{Label: "Devnet", Domain: "devnet.explore.lux.network", ChainID: 96367},
+		},
+	}
+	f, err := NewFrontend(cfg, NewChainRegistry())
+	if err != nil {
+		t.Fatalf("NewFrontend: %v", err)
+	}
+
+	_, peers := f.networksForHost("explore.lux.network")
+	got := networkSwitcher(cfg.Networks, peers)
+
+	want := map[string]string{
+		"Mainnet": "explore.lux.network",
+		"Testnet": "explorer.lux-test.network",
+		"Devnet":  "explorer.lux-dev.network",
+	}
+	if len(got) != len(want) {
+		t.Fatalf("want %d entries, got %d", len(want), len(got))
+	}
+	for _, n := range got {
+		if n.Domain != want[n.Label] {
+			t.Errorf("%s domain = %q, want %q", n.Label, n.Domain, want[n.Label])
+		}
+	}
+	// Chain IDs are config's to know, and are left alone.
+	if got[2].ChainID != 96367 {
+		t.Errorf("devnet chainID = %d, want 96367 (genesis cChainGenesis.config.chainId)", got[2].ChainID)
+	}
+}

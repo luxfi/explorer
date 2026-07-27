@@ -168,7 +168,7 @@ func (f *Frontend) handleEnvs(w http.ResponseWriter, r *http.Request) {
 	current, peers := f.networksForHost(r.Host)
 	env := map[string]any{
 		"VITE_CHAINS":          chains,
-		"VITE_NETWORKS":        f.cfg.Networks,
+		"VITE_NETWORKS":        networkSwitcher(f.cfg.Networks, peers),
 		"VITE_BRAND":           hostBrand,
 		"VITE_CURRENT_NETWORK": current,
 		"VITE_NETWORK_HOSTS":   peers,
@@ -335,6 +335,25 @@ func hostMatchesSlug(host, slug string) bool {
 // If we can't classify the host (admin tooling on localhost, internal
 // service-mesh hostnames), we return ("", nil) and the SPA omits the
 // dropdown.
+// networkSwitcher renders the cross-network switcher entries. Domains come
+// from peers — derived from the request host by networksForHost, which is
+// the only thing that knows what a sibling network is actually called. The
+// config's `networks[].domain` is a second, hand-maintained copy of that
+// same fact, and it had drifted: it advertised
+// testnet.explore.lux.network and devnet.explore.lux.network, neither of
+// which resolves, while the live hosts are explorer.lux-{test,dev}.network.
+// Config keeps what only config knows — the label and the chain ID.
+func networkSwitcher(configured []Network, peers map[string]string) []Network {
+	out := make([]Network, 0, len(configured))
+	for _, n := range configured {
+		if derived, ok := peers[strings.ToLower(n.Label)]; ok && derived != "" {
+			n.Domain = derived
+		}
+		out = append(out, n)
+	}
+	return out
+}
+
 func (f *Frontend) networksForHost(host string) (string, map[string]string) {
 	host = strings.ToLower(strings.SplitN(host, ":", 2)[0])
 
@@ -365,9 +384,14 @@ func (f *Frontend) networksForHost(host string) (string, map[string]string) {
 	mainnetHost := "explore." + brand + mainnetTLD
 	testnetHost := "explorer." + brand + "-test.network"
 
+	// Every sibling host is derivable from the brand, so derive all of
+	// them unconditionally. Handing back only the ones the current env
+	// happened to need left the switcher's remaining entries falling back
+	// to hand-written config domains that no longer resolve.
 	peers := map[string]string{
 		"mainnet": mainnetHost,
 		"testnet": testnetHost,
+		"devnet":  "explorer." + brand + "-dev.network",
 	}
 	switch env {
 	case "":
@@ -375,8 +399,6 @@ func (f *Frontend) networksForHost(host string) (string, map[string]string) {
 	case "test", "testnet":
 		return "testnet", peers
 	case "dev", "devnet":
-		// Optional devnet entry; only surfaces when present.
-		peers["devnet"] = "explorer." + brand + "-dev.network"
 		return "devnet", peers
 	default:
 		return env, peers
