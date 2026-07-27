@@ -135,6 +135,19 @@ func main() {
 		})
 	})
 
+	// Blockscout stats-microservice surface (/v1/counters, /v1/lines,
+	// /v1/lines/{id}, /v1/pages/*) for the default chain. The Next.js /stats page
+	// enables these when NEXT_PUBLIC_STATS_API_HOST is set and shows error banners
+	// without them; served from the default chain's live indexer SQLite DB.
+	statsSlug := "cchain"
+	for _, c := range cfg.Chains {
+		if c.Default {
+			statsSlug = c.Slug
+			break
+		}
+	}
+	NewStatsService(filepath.Join(cfg.DataDir, statsSlug, "query", "indexer.db")).Mount(mux)
+
 	mux.HandleFunc("GET /v1/explorer/admin/chains", registry.HandleList)
 	mux.HandleFunc("POST /v1/explorer/admin/chains", registry.HandleAdd)
 	mux.HandleFunc("PUT /v1/explorer/admin/chains/{slug}", registry.HandleUpdate)

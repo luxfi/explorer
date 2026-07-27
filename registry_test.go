@@ -16,7 +16,7 @@ func TestRegistryAddAndList(t *testing.T) {
 	err := r.Add(ChainConfig{
 		Slug:   "cchain",
 		Name:   "C-Chain",
-		RPC:    "http://localhost:9650/ext/bc/C/rpc",
+		RPC:    "http://localhost:9650/v1/bc/C/rpc",
 		Type:   "evm",
 		Source: "config",
 	})
@@ -131,7 +131,7 @@ func TestRegistryDefaultType(t *testing.T) {
 
 func TestRegistryLoadFromEnv(t *testing.T) {
 	r := NewChainRegistry()
-	r.LoadFromEnv("cchain:http://localhost:9650/ext/bc/C/rpc,zoo:http://localhost:9650/ext/bc/Zoo/rpc")
+	r.LoadFromEnv("cchain:http://localhost:9650/v1/bc/C/rpc,zoo:http://localhost:9650/v1/bc/Zoo/rpc")
 
 	if r.Count() != 2 {
 		t.Fatalf("expected 2 chains, got %d", r.Count())
@@ -145,13 +145,13 @@ func TestRegistryLoadFromFile(t *testing.T) {
   - slug: cchain
     name: C-Chain
     chain_id: 96369
-    rpc: http://localhost:9650/ext/bc/C/rpc
+    rpc: http://localhost:9650/v1/bc/C/rpc
     type: evm
     default: true
   - slug: zoo
     name: Zoo
     chain_id: 200200
-    rpc: http://localhost:9650/ext/bc/Zoo/rpc
+    rpc: http://localhost:9650/v1/bc/Zoo/rpc
     type: evm
 `), 0644)
 
@@ -199,7 +199,7 @@ func TestHandleAddAndRemove(t *testing.T) {
 	r := NewChainRegistry()
 
 	// Add
-	payload := `{"slug":"cchain","name":"C-Chain","rpc":"http://localhost:9650/ext/bc/C/rpc","type":"evm"}`
+	payload := `{"slug":"cchain","name":"C-Chain","rpc":"http://localhost:9650/v1/bc/C/rpc","type":"evm"}`
 	req := httptest.NewRequest("POST", "/v1/explorer/admin/chains", bytes.NewBufferString(payload))
 	req.Header.Set("Content-Type", "application/json")
 	w := httptest.NewRecorder()
@@ -355,7 +355,7 @@ func TestHTTPIntegration(t *testing.T) {
 	}
 
 	// Add
-	addPayload := `{"slug":"cchain","name":"C-Chain","chain_id":96369,"rpc":"http://localhost:9650/ext/bc/C/rpc","type":"evm","default":true}`
+	addPayload := `{"slug":"cchain","name":"C-Chain","chain_id":96369,"rpc":"http://localhost:9650/v1/bc/C/rpc","type":"evm","default":true}`
 	resp, err = client.Post(ts.URL+"/v1/explorer/admin/chains", "application/json", bytes.NewBufferString(addPayload))
 	if err != nil {
 		t.Fatal(err)
@@ -377,7 +377,7 @@ func TestHTTPIntegration(t *testing.T) {
 	}
 
 	// Update
-	updatePayload := `{"name":"Lux C-Chain","rpc":"http://new:9650/ext/bc/C/rpc"}`
+	updatePayload := `{"name":"Lux C-Chain","rpc":"http://new:9650/v1/bc/C/rpc"}`
 	updateReq, _ := http.NewRequest("PUT", ts.URL+"/v1/explorer/admin/chains/cchain", bytes.NewBufferString(updatePayload))
 	updateReq.Header.Set("Content-Type", "application/json")
 	resp, err = client.Do(updateReq)
