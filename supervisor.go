@@ -393,6 +393,10 @@ func (s *ChainSupervisor) runSubgraph(ctx context.Context, cfg ChainConfig, sg S
 		RPC:         cfg.RPC,
 		PoolManager: cfg.PoolManager, // empty => indexer defaults to 0x9999
 		StartBlock:  cfg.Indexer.StartBlock,
+		// Every other line this supervisor emits is prefixed "[slug/name]"; the
+		// graph indexer's were not, so in a six-chain process there was no way to
+		// tell which chain a line came from — or which chain had gone quiet.
+		Label: cfg.Slug + "/" + sg.Name,
 	}, store)
 	// One-shot enrichment of Token rows persisted by an older graph build with the
 	// address placeholder (symbol == shortAddr). Opt-in via BACKFILL_TOKENS=1; runs
