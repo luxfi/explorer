@@ -19,8 +19,10 @@ import (
 	graphidx "github.com/luxfi/graph/indexer"
 	graphstor "github.com/luxfi/graph/storage"
 
+	"github.com/luxfi/indexer/chain"
 	"github.com/luxfi/indexer/evm"
 	"github.com/luxfi/indexer/explorer"
+	"github.com/luxfi/indexer/platform"
 	idxstor "github.com/luxfi/indexer/storage"
 )
 
@@ -224,6 +226,80 @@ func (s *ChainSupervisor) runChain(ctx context.Context, cfg ChainConfig) {
 		if err := idx.Run(ctx); err != nil && ctx.Err() == nil {
 			log.Printf("[%s] evm run: %v", cfg.Slug, err)
 		}
+	case "linear", "platform":
+		// P-Chain (platform VM) indexing. The generic chain indexer supplies
+		// the canonical pchain_blocks schema; the platform adapter supplies the
+		// validator/delegator/etc schema and the RPC block/validator fetchers.
+		poll := 30 * time.Second
+		if cfg.Indexer.PollInterval != "" {
+			if d, err := time.ParseDuration(cfg.Indexer.PollInterval); err == nil {
+				poll = d
+			}
+		}
+		adapter := platform.New(cfg.RPC)
+		chainCfg := platform.NewConfig() // ChainType=pchain -> pchain_blocks table
+		chainCfg.ChainName = cfg.Name
+		chainCfg.RPCEndpoint = cfg.RPC
+		chainCfg.PollInterval = poll
+		idx, err := chain.New(chainCfg, store, adapter)
+		if err != nil {
+			log.Printf("[%s] platform indexer: %v", cfg.Slug, err)
+			return
+		}
+		// Init once: creates pchain_blocks (generic schema) and the adapter's
+		// pchain_validators/pchain_delegators/... tables. We drive our own poll
+		// loop rather than idx.Run() so we don't stand up the chain indexer's
+		// WS-gated poller + HTTP server (the standalone API reads the SQLite DB
+		// directly). Blocks are written via store.StoreBlock, not idx.StoreBlock,
+		// to avoid the indexer's subscriber broadcast (nothing drains it here).
+		if err := idx.Init(ctx); err != nil {
+			log.Printf("[%s] platform init: %v", cfg.Slug, err)
+			return
+		}
+		const platformBlocksTable = "pchain_blocks"
+		sync := func() {
+			raw, err := adapter.GetRecentBlocks(ctx, 50)
+			if err != nil {
+				if ctx.Err() == nil {
+					log.Printf("[%s] platform blocks: %v", cfg.Slug, err)
+				}
+			} else {
+				for _, rb := range raw {
+					b, perr := adapter.ParseBlock(rb)
+					if perr != nil {
+						continue
+					}
+					sb := &idxstor.Block{
+						ID:        b.ID,
+						ParentID:  b.ParentID,
+						Height:    b.Height,
+						Timestamp: b.Timestamp,
+						Status:    string(b.Status),
+						TxCount:   b.TxCount,
+						TxIDs:     b.TxIDs,
+						Data:      b.Data,
+						CreatedAt: time.Now(),
+					}
+					if err := store.StoreBlock(ctx, platformBlocksTable, sb); err != nil && ctx.Err() == nil {
+						log.Printf("[%s] platform store block %d: %v", cfg.Slug, b.Height, err)
+					}
+				}
+			}
+			if err := adapter.SyncValidators(ctx, store); err != nil && ctx.Err() == nil {
+				log.Printf("[%s] platform validators: %v", cfg.Slug, err)
+			}
+		}
+		sync() // first pass immediately so tables populate before the first tick
+		ticker := time.NewTicker(poll)
+		defer ticker.Stop()
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			case <-ticker.C:
+				sync()
+			}
+		}
 	default:
 		log.Printf("[%s] %s indexer: passive (no chain-specific implementation)", cfg.Slug, cfg.Type)
 		<-ctx.Done()
@@ -248,15 +324,26 @@ func (s *ChainSupervisor) mountIndexerAPI(ctx context.Context, cfg ChainConfig, 
 			}
 			continue
 		}
-		if cfg.Type == "" || cfg.Type == "evm" {
+		// Gate readiness on the primary blocks table for this chain type:
+		// EVM writes evm_blocks; platform/linear writes pchain_blocks (created
+		// by the generic chain indexer's Init — NOT by platform.InitSchema,
+		// which only creates the validator/delegator/etc tables).
+		gateTable := ""
+		switch cfg.Type {
+		case "", "evm":
+			gateTable = "evm_blocks"
+		case "platform", "linear":
+			gateTable = "pchain_blocks"
+		}
+		if gateTable != "" {
 			db, err := sql.Open("sqlite3", "file:"+dbPath+"?mode=ro")
 			if err == nil {
 				var n int
-				_ = db.QueryRow("SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name='evm_blocks'").Scan(&n)
+				_ = db.QueryRow("SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name=?", gateTable).Scan(&n)
 				db.Close()
 				if n == 0 {
 					if time.Now().After(deadline) {
-						log.Printf("[%s] api waiting for evm_blocks", cfg.Slug)
+						log.Printf("[%s] api waiting for %s", cfg.Slug, gateTable)
 						deadline = time.Now().Add(5 * time.Minute)
 					}
 					continue

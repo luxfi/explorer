@@ -81,7 +81,7 @@ chains:
   - slug: bchain
     name: B-Chain
     type: dag
-    rpc: ${LUX_RPC:-https://api.lux.network}/ext/bc/B
+    rpc: ${LUX_RPC:-https://api.lux.network}/v1/bc/B
     coin: LUX
     enabled: true
 
@@ -95,7 +95,7 @@ chains:
   - slug: tchain
     name: T-Chain
     type: dag
-    rpc: ${LUX_RPC:-https://api.lux.network}/ext/bc/T
+    rpc: ${LUX_RPC:-https://api.lux.network}/v1/bc/T
     coin: LUX
     enabled: true
 
