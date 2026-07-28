@@ -155,7 +155,7 @@ chains:
     name: SPC
     chain_id: 36911
     type: evm
-    rpc: ${SPC_RPC:-https://api.lux.network/v1/bc/SPC/rpc}
+    rpc: ${SPC_RPC:-https://api.SPC.network/v1/bc/C/rpc}
     coin: SPC
     enabled: true
     indexer: { poll_interval: 30s }
