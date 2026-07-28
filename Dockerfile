@@ -20,10 +20,10 @@ RUN apk add --no-cache gcc musl-dev sqlite-dev git
 # (not via proxy/sumdb) and skip checksum-db cross-checks, exactly as the
 # node image does. The default GITHUB_TOKEN is repo-scoped; a cross-org PAT
 # is injected as the BuildKit secret `ghtok` by docker.yml.
-ENV GOPRIVATE=github.com/luxfi/*,github.com/hanzoai/*
+ENV GOPRIVATE=github.com/lux-private/*,github.com/luxfi/graph,github.com/luxfi/indexer,github.com/hanzoai/*
 ENV GONOSUMCHECK=github.com/luxfi/*
-ENV GONOSUMDB=github.com/luxfi/*
-ENV GONOPROXY=github.com/luxfi/*
+ENV GONOSUMDB=github.com/lux-private/*,github.com/luxfi/graph,github.com/luxfi/indexer
+ENV GONOPROXY=github.com/lux-private/*,github.com/luxfi/graph,github.com/luxfi/indexer
 ENV GOFLAGS=-mod=mod
 
 WORKDIR /src
