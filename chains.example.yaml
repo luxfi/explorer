@@ -39,7 +39,7 @@ chains:
     name: Lux C-Chain
     chain_id: 96369
     type: evm
-    rpc: ${LUX_CCHAIN_RPC:-https://api.lux.network/ext/bc/C/rpc}
+    rpc: ${LUX_CCHAIN_RPC:-https://api.lux.network/v1/bc/C/rpc}
     coin: LUX
     enabled: true
     default: true
@@ -62,21 +62,21 @@ chains:
   - slug: pchain
     name: P-Chain
     type: linear
-    rpc: ${LUX_RPC:-https://api.lux.network}/ext/bc/P
+    rpc: ${LUX_RPC:-https://api.lux.network}/v1/bc/P
     coin: LUX
     enabled: true
 
   - slug: xchain
     name: X-Chain
     type: dag
-    rpc: ${LUX_RPC:-https://api.lux.network}/ext/bc/X
+    rpc: ${LUX_RPC:-https://api.lux.network}/v1/bc/X
     coin: LUX
     enabled: true
 
   - slug: achain
     name: A-Chain
     type: dag
-    rpc: ${LUX_RPC:-https://api.lux.network}/ext/bc/A
+    rpc: ${LUX_RPC:-https://api.lux.network}/v1/bc/A
     coin: LUX
     enabled: true
 
@@ -90,7 +90,7 @@ chains:
   - slug: qchain
     name: Q-Chain
     type: dag
-    rpc: ${LUX_RPC:-https://api.lux.network}/ext/bc/Q
+    rpc: ${LUX_RPC:-https://api.lux.network}/v1/bc/Q
     coin: LUX
     enabled: true
 
@@ -104,14 +104,14 @@ chains:
   - slug: zchain
     name: Z-Chain
     type: dag
-    rpc: ${LUX_RPC:-https://api.lux.network}/ext/bc/Z
+    rpc: ${LUX_RPC:-https://api.lux.network}/v1/bc/Z
     coin: LUX
     enabled: true
 
   - slug: kchain
     name: K-Chain
     type: dag
-    rpc: ${LUX_RPC:-https://api.lux.network}/ext/bc/K
+    rpc: ${LUX_RPC:-https://api.lux.network}/v1/bc/K
     coin: LUX
     enabled: true
 
@@ -121,7 +121,7 @@ chains:
     name: Zoo
     chain_id: 200200
     type: evm
-    rpc: ${ZOO_RPC:-https://api.lux.network/ext/bc/Zoo/rpc}
+    rpc: ${ZOO_RPC:-https://api.zoo.network/v1/bc/C/rpc}
     coin: ZOO
     enabled: true
     indexer: { poll_interval: 30s }
@@ -138,7 +138,7 @@ chains:
     name: Hanzo
     chain_id: 36963
     type: evm
-    rpc: ${HANZO_RPC:-https://api.lux.network/ext/bc/Hanzo/rpc}
+    rpc: ${HANZO_RPC:-https://api.hanzo.network/v1/bc/C/rpc}
     coin: HANZO
     enabled: true
     indexer: { poll_interval: 30s }
@@ -155,7 +155,7 @@ chains:
     name: SPC
     chain_id: 36911
     type: evm
-    rpc: ${SPC_RPC:-https://api.lux.network/ext/bc/SPC/rpc}
+    rpc: ${SPC_RPC:-https://api.lux.network/v1/bc/SPC/rpc}
     coin: SPC
     enabled: true
     indexer: { poll_interval: 30s }
@@ -164,7 +164,7 @@ chains:
     name: Pars
     chain_id: 494949
     type: evm
-    rpc: ${PARS_RPC:-https://api.lux.network/ext/bc/Pars/rpc}
+    rpc: ${PARS_RPC:-https://api.pars.network/v1/bc/C/rpc}
     coin: PARS
     enabled: true
     indexer: { poll_interval: 30s }
@@ -172,7 +172,7 @@ chains:
   - slug: dex
     name: Lux DEX
     type: evm
-    rpc: ${LUX_RPC:-https://api.lux.network}/ext/bc/D/rpc
+    rpc: ${LUX_RPC:-https://api.lux.network}/v1/bc/D/rpc
     coin: LUX
     enabled: true
     indexer: { poll_interval: 15s }

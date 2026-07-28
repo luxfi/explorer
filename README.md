@@ -71,7 +71,7 @@ chains:
     name: Lux C-Chain
     chain_id: 96369
     type: evm
-    rpc: https://api.lux.network/mainnet/ext/bc/C/rpc
+    rpc: https://api.lux.network/v1/bc/C/rpc
     coin: LUX
     enabled: true
     default: true
