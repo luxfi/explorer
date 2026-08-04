@@ -62,7 +62,7 @@ func (r *ChainRegistry) probeNode(host string, port int, brand string) {
 	base := fmt.Sprintf("http://%s:%d", host, port)
 
 	// Query node info
-	info, err := rpcCall(base+"/ext/info", "info.getNodeID", nil)
+	info, err := rpcCall(base+"/v1/info", "info.getNodeID", nil)
 	if err != nil {
 		log.Printf("[mdns] probe %s failed: %v", base, err)
 		return
@@ -73,7 +73,7 @@ func (r *ChainRegistry) probeNode(host string, port int, brand string) {
 
 	// Use info.getChains — returns ONLY chains this node is actively tracking.
 	// One RPC call, no probing. Added in luxd v1.24.28+.
-	chains, err := rpcCall(base+"/ext/info", "info.getChains", nil)
+	chains, err := rpcCall(base+"/v1/info", "info.getChains", nil)
 	if err != nil {
 		// Fallback: older nodes without info.getChains — probe each chain
 		log.Printf("[mdns] %s: info.getChains not available, falling back to platform probe", base)
