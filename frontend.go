@@ -6,7 +6,9 @@ import (
 	"encoding/json"
 	"fmt"
 	"io/fs"
+	"net"
 	"net/http"
+	"net/url"
 	"os"
 	"path/filepath"
 	"strings"
@@ -518,13 +520,60 @@ func (f *Frontend) chainListJSON() []map[string]any {
 			"slug":    c.Slug,
 			"name":    c.Name,
 			"chainId": c.ChainID,
-			"rpc":     c.RPC,
+			"rpc":     browserRPC(c),
 			"coin":    c.CoinSymbol,
 			"type":    c.Type,
 			"default": c.Default,
 		})
 	}
 	return out
+}
+
+// browserRPC picks the RPC URL to hand the SPA. ChainConfig.RPC is the address
+// THIS PROCESS dials, which in-cluster is a service-mesh name; emitting it here
+// shipped `http://luxd-headless.lux-mainnet.svc.cluster.local:9630/v1/bc/C/rpc`
+// to every browser loading explore.lux.network, where it is unresolvable.
+//
+// Prefer an explicit public_rpc; otherwise pass RPC through only when a browser
+// could actually reach it. Returning "" is deliberate and better than a URL that
+// always fails: the SPA can hide the affected action instead of offering a
+// control that silently errors.
+func browserRPC(c ChainConfig) string {
+	if c.PublicRPC != "" {
+		return c.PublicRPC
+	}
+	if browserReachable(c.RPC) {
+		return c.RPC
+	}
+	return ""
+}
+
+// browserReachable reports whether url names a host reachable from outside the
+// cluster. Cluster-internal DNS, loopback and RFC1918 literals are not.
+func browserReachable(raw string) bool {
+	if raw == "" {
+		return false
+	}
+	u, err := url.Parse(raw)
+	if err != nil {
+		return false
+	}
+	host := u.Hostname()
+	if host == "" {
+		return false
+	}
+	if strings.HasSuffix(host, ".svc.cluster.local") || strings.HasSuffix(host, ".local") ||
+		strings.HasSuffix(host, ".svc") || strings.HasSuffix(host, ".internal") {
+		return false
+	}
+	if host == "localhost" || host == "127.0.0.1" || host == "::1" {
+		return false
+	}
+	if ip := net.ParseIP(host); ip != nil {
+		return !(ip.IsLoopback() || ip.IsPrivate() || ip.IsLinkLocalUnicast() || ip.IsUnspecified())
+	}
+	// A bare single-label name (no dot) is a cluster service name, not public.
+	return strings.Contains(host, ".")
 }
 
 // contentTypeFor maps a file extension to a Content-Type, defaulting to
