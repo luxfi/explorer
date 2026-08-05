@@ -27,7 +27,17 @@ type ChainConfig struct {
 	Name        string `json:"name"         yaml:"name"`
 	ChainID     int64  `json:"chain_id"     yaml:"chain_id"`
 	Type        string `json:"type"         yaml:"type"` // evm, dag, linear, solana, bitcoin, cosmos
-	RPC         string `json:"rpc"          yaml:"rpc"`
+	// RPC is the address THIS PROCESS dials. In-cluster that is normally a
+	// service-mesh name (luxd-headless.lux-mainnet.svc.cluster.local:9630),
+	// which is correct for the indexer and USELESS to a browser.
+	RPC string `json:"rpc"          yaml:"rpc"`
+	// PublicRPC is what the browser is told to use. Split from RPC because the
+	// two have opposite requirements and one field cannot satisfy both: the
+	// SPA was being handed `http://luxd-headless…svc.cluster.local:9630/...`,
+	// which no browser can resolve, so every wallet/network action against the
+	// default chain failed. Leave empty when RPC is already public — see
+	// browserReachable() in frontend.go, which falls back to RPC in that case.
+	PublicRPC   string `json:"public_rpc,omitempty" yaml:"public_rpc,omitempty"`
 	WS          string `json:"ws"           yaml:"ws"`
 	CoinSymbol  string `json:"coin"         yaml:"coin"`
 	PoolManager string `json:"pool_manager" yaml:"pool_manager"` // DEX settlement precompile (0x9999); empty => indexer default

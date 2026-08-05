@@ -4,7 +4,9 @@ import (
 	"database/sql"
 	"encoding/json"
 	"fmt"
+	"log"
 	"net/http"
+	"strconv"
 	"sync"
 	"time"
 )
@@ -55,7 +57,16 @@ func (s *StatsService) conn() (*sql.DB, error) {
 }
 
 // Mount registers the stats-service routes on mux.
+//
+// /v1/stats and /v1/blocks are the CANONICAL names. Everything under /v1 and
+// nothing under /api — there is no /api/v2 here and never will be; see the
+// house rule (api.* hosts carry /v1/ paths, and v1 is never bumped).
+// /v1/counters and /v1/pages/* remain as the chart/page-shaped views the SPA
+// already consumes; /v1/stats is the flat summary and is what external callers
+// and health checks should use.
 func (s *StatsService) Mount(mux *http.ServeMux) {
+	mux.HandleFunc("GET /v1/stats", s.handleStats)
+	mux.HandleFunc("GET /v1/blocks", s.handleBlocks)
 	mux.HandleFunc("GET /v1/counters", s.handleCounters)
 	mux.HandleFunc("GET /v1/lines", s.handleLines)
 	mux.HandleFunc("GET /v1/lines/{id}", s.handleLine)
@@ -222,6 +233,99 @@ func (s *StatsService) handleLine(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusOK, statsLineChart{Chart: points, Info: info})
+}
+
+// handleStats is the canonical flat summary: GET /v1/stats. Values are plain
+// JSON numbers, not the counter envelopes /v1/counters uses, so a caller can
+// compare total_blocks against eth_blockNumber without unwrapping anything.
+// That comparison is the only honest way to tell whether the index is current —
+// an HTTP 200 from the explorer proves nothing about whether it has the chain.
+func (s *StatsService) handleStats(w http.ResponseWriter, r *http.Request) {
+	db, err := s.conn()
+	if err != nil {
+		// No DB yet is a real state (fresh chain, indexer still starting), not
+		// an error. Report zeroes and say so, rather than 500ing a health check.
+		writeJSON(w, http.StatusOK, map[string]any{
+			"total_blocks": 0, "total_transactions": 0, "total_addresses": 0,
+			"average_block_time": 0, "indexed": false,
+		})
+		return
+	}
+	var head int64
+	_ = db.QueryRow("SELECT COALESCE(MAX(number),0) FROM evm_blocks").Scan(&head)
+	writeJSON(w, http.StatusOK, map[string]any{
+		"total_blocks":       s.count(db, "evm_blocks"),
+		"total_transactions": s.count(db, "evm_transactions"),
+		"total_addresses":    s.count(db, "evm_addresses"),
+		"average_block_time": s.avgBlockTimeSec(db),
+		"head_block":         head,
+		"indexed":            true,
+	})
+}
+
+// handleBlocks is the canonical block list: GET /v1/blocks?limit=&before=.
+// Newest first. `before` pages backwards by block number so a caller never has
+// to guess an offset while the head advances underneath it.
+func (s *StatsService) handleBlocks(w http.ResponseWriter, r *http.Request) {
+	limit := 50
+	if v := r.URL.Query().Get("limit"); v != "" {
+		if n, err := strconv.Atoi(v); err == nil && n > 0 {
+			limit = n
+		}
+	}
+	if limit > 200 {
+		limit = 200 // bound the page; an unbounded LIMIT is a DoS on a big index
+	}
+	db, err := s.conn()
+	if err != nil {
+		writeJSON(w, http.StatusOK, map[string]any{"blocks": []any{}, "indexed": false})
+		return
+	}
+	// CAST(timestamp AS INTEGER) on purpose: the real schema declares the column
+	// TIMESTAMP, and go-sqlite3 converts declared TIMESTAMP/DATETIME columns to
+	// time.Time, which will not Scan into an int64 — every row would be skipped
+	// and the endpoint would answer an empty list on a fully populated index.
+	// The CAST makes the wire type independent of the declared type.
+	query := `SELECT number, hash, parent_hash, miner, gas_limit, gas_used, base_fee,
+		CAST(timestamp AS INTEGER), tx_count FROM evm_blocks`
+	args := []any{}
+	if b := r.URL.Query().Get("before"); b != "" {
+		if n, err := strconv.ParseInt(b, 10, 64); err == nil {
+			query += " WHERE number < ?"
+			args = append(args, n)
+		}
+	}
+	query += " ORDER BY number DESC LIMIT ?"
+	args = append(args, limit)
+
+	rows, err := db.Query(query, args...)
+	if err != nil {
+		// Say WHY. An empty list that silently means "the query broke" is
+		// indistinguishable from "this chain has no blocks", and that ambiguity
+		// is exactly how a scan-type bug hides behind a 200.
+		log.Printf("v1/blocks: query failed: %v", err)
+		writeJSON(w, http.StatusOK, map[string]any{"blocks": []any{}, "indexed": true, "error": err.Error()})
+		return
+	}
+	defer rows.Close()
+
+	blocks := []map[string]any{}
+	for rows.Next() {
+		var (
+			number, gasLimit, gasUsed, ts, txCount int64
+			hash, parent, miner, baseFee           sql.NullString
+		)
+		if err := rows.Scan(&number, &hash, &parent, &miner, &gasLimit, &gasUsed, &baseFee, &ts, &txCount); err != nil {
+			log.Printf("v1/blocks: skipping row: %v", err)
+			continue
+		}
+		blocks = append(blocks, map[string]any{
+			"number": number, "hash": hash.String, "parent_hash": parent.String,
+			"miner": miner.String, "gas_limit": gasLimit, "gas_used": gasUsed,
+			"base_fee": baseFee.String, "timestamp": ts, "tx_count": txCount,
+		})
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"blocks": blocks, "indexed": true})
 }
 
 func (s *StatsService) handlePagesMain(w http.ResponseWriter, r *http.Request) {
