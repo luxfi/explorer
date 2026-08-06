@@ -35,3 +35,7 @@ QWEN.md
 # Runtime
 logs/
 .claude/
+
+# Agent notes — local only (see the org LLM.md convention)
+LLM.md
+CLAUDE.md
