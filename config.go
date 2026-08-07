@@ -41,7 +41,16 @@ type ChainConfig struct {
 	WS          string `json:"ws"           yaml:"ws"`
 	CoinSymbol  string `json:"coin"         yaml:"coin"`
 	PoolManager string `json:"pool_manager" yaml:"pool_manager"` // DEX settlement precompile (0x9999); empty => indexer default
-	Enabled     bool   `json:"enabled"      yaml:"enabled"`
+	// Enabled gates the chain entirely: a disabled chain is never registered,
+	// so it is not indexed, mounts no routes, and does not reach the SPA's
+	// chain list. See ChainRegistry.Add, the single place it is honoured.
+	//
+	// A pointer, so absent and false are distinguishable. Absent means ON —
+	// every config predating this field wrote `enabled: true` by convention
+	// while the field was inert, and a plain bool would read a future config
+	// that simply omits the key as "off" and make the chain vanish with no
+	// error. Nil is no opinion; only an explicit `enabled: false` disables.
+	Enabled     *bool  `json:"enabled,omitempty" yaml:"enabled,omitempty"`
 	Default     bool   `json:"default"      yaml:"default"`
 	Source      string `json:"source"       yaml:"-"` // config, env, mdns, admin
 
@@ -99,6 +108,10 @@ type Network struct {
 	Domain  string `yaml:"domain"   json:"domain"`
 	ChainID int64  `yaml:"chain_id" json:"chainId"`
 }
+
+// On reports whether the chain should run. Absent means on; only an explicit
+// `enabled: false` turns a chain off.
+func (c ChainConfig) On() bool { return c.Enabled == nil || *c.Enabled }
 
 // slugPattern restricts chain slugs to lowercase alphanumeric + hyphen so they
 // remain safe in URL routes (/v1/indexer/{slug}/) and filesystem paths.

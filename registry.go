@@ -55,6 +55,19 @@ func (r *ChainRegistry) Add(cfg ChainConfig) error {
 	if cfg.Type == "" {
 		cfg.Type = "evm"
 	}
+	// A disabled chain is not registered at all. Every path in — config, env,
+	// mDNS, admin — lands here, so this is the whole of what `enabled` means.
+	//
+	// It used to mean nothing. The field was declared on ChainConfig and read
+	// nowhere, so `enabled: false` registered the chain, spawned its indexer
+	// and polled its RPC exactly like `enabled: true`. lux-mainnet carried an
+	// spc entry pointing at a chain that does not exist on that network; the
+	// indexer polled it forever and logged 1,800 errors an hour against a
+	// switch that was already off.
+	if !cfg.On() {
+		log.Printf("[registry] chain %s disabled, not registered", cfg.Slug)
+		return nil
+	}
 
 	r.mu.Lock()
 	if existing, ok := r.chains[cfg.Slug]; ok {
