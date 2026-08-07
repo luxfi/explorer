@@ -37,6 +37,13 @@ RUN --mount=type=secret,id=ghtok,required=false \
     go mod download
 
 COPY . .
+# Tests run here, in the one place that already has cgo + sqlite-dev, so a
+# release that fails them never becomes an image. Nothing else in this repo
+# runs them: .hanzo/workflows/release.yml builds on a v* tag and there is no
+# other workflow, so a test file added to this repo was, until now, never
+# executed by anything but a developer's laptop.
+RUN CGO_ENABLED=1 CGO_CFLAGS="-D_LARGEFILE64_SOURCE" go vet ./... && \
+    CGO_ENABLED=1 CGO_CFLAGS="-D_LARGEFILE64_SOURCE" go test ./...
 RUN CGO_ENABLED=1 CGO_CFLAGS="-D_LARGEFILE64_SOURCE" \
     go build -trimpath \
       -ldflags="-s -w -X main.version=${VERSION}" \

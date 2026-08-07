@@ -413,3 +413,86 @@ func TestHTTPIntegration(t *testing.T) {
 		t.Fatalf("expected 0 chains after delete")
 	}
 }
+
+// TestChainEnabledGatesRegistration pins what `enabled` means. It meant nothing
+// before: the field was declared on ChainConfig and read nowhere, so a chain
+// switched off in config was registered, indexed and polled exactly like one
+// switched on. Each case below fails independently if the check is removed or
+// if the absent-means-on default is dropped.
+func TestChainEnabledGatesRegistration(t *testing.T) {
+	on, off := true, false
+	base := ChainConfig{RPC: "http://localhost:9650/v1/bc/C/rpc", Type: "evm", Source: "config"}
+
+	for _, tc := range []struct {
+		name     string
+		enabled  *bool
+		register bool
+	}{
+		{"explicit false does not register", &off, false},
+		{"explicit true registers", &on, true},
+		// The reason Enabled is a pointer. Every chains.yaml written while the
+		// field was inert says `enabled: true` by convention, but a plain bool
+		// would read a config that simply omits the key as "off" and drop the
+		// chain silently — no error, no log, just a missing chain.
+		{"absent registers", nil, true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			r := NewChainRegistry()
+			c := base
+			c.Slug, c.Enabled = "cchain", tc.enabled
+			if err := r.Add(c); err != nil {
+				t.Fatalf("Add: %v", err)
+			}
+			if got := r.Count() == 1; got != tc.register {
+				t.Fatalf("registered=%v, want %v", got, tc.register)
+			}
+			if _, ok := r.Get("cchain"); ok != tc.register {
+				t.Fatalf("Get ok=%v, want %v", ok, tc.register)
+			}
+		})
+	}
+}
+
+// TestDisabledChainNeverStartsIndexer is the failure this fixes, stated as the
+// symptom: a disabled chain must not reach the supervisor, because reaching it
+// is what spawned the indexer goroutine that polled a nonexistent RPC forever.
+func TestDisabledChainNeverStartsIndexer(t *testing.T) {
+	off := false
+	r := NewChainRegistry()
+	r.AttachSupervisor(nil) // a real supervisor would spawn goroutines; nil panics if reached
+	if err := r.Add(ChainConfig{
+		Slug: "spc", RPC: "http://localhost:9650/v1/bc/spc/rpc", Type: "evm",
+		Source: "config", Enabled: &off,
+	}); err != nil {
+		t.Fatalf("Add: %v", err)
+	}
+	if r.Count() != 0 {
+		t.Fatalf("disabled chain reached the registry: count=%d", r.Count())
+	}
+	if len(r.List()) != 0 {
+		t.Fatalf("disabled chain reached the SPA chain list: %v", r.List())
+	}
+}
+
+// TestLoadConfigKeepsEnabled proves the YAML actually decodes into the pointer —
+// a wrong tag would leave it nil and silently re-enable every disabled chain.
+func TestLoadConfigKeepsEnabled(t *testing.T) {
+	p := filepath.Join(t.TempDir(), "chains.yaml")
+	if err := os.WriteFile(p, []byte(
+		"chains:\n"+
+			"  - slug: cchain\n    rpc: http://x/rpc\n    enabled: true\n"+
+			"  - slug: spc\n    rpc: http://x/rpc\n    enabled: false\n"+
+			"  - slug: osage\n    rpc: http://x/rpc\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	cfg, err := LoadConfig(p)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := map[string]bool{"cchain": true, "spc": false, "osage": true}
+	for _, c := range cfg.Chains {
+		if c.On() != want[c.Slug] {
+			t.Errorf("%s: On()=%v, want %v", c.Slug, c.On(), want[c.Slug])
+		}
+	}
+}
