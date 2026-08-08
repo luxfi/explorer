@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 	"regexp"
+	"strings"
 
 	"gopkg.in/yaml.v3"
 )
@@ -23,10 +24,10 @@ type Config struct {
 // ChainID/RPC/Type/Default are optional and apply when the chain is loaded
 // from a config file.
 type ChainConfig struct {
-	Slug        string `json:"slug"         yaml:"slug"`
-	Name        string `json:"name"         yaml:"name"`
-	ChainID     int64  `json:"chain_id"     yaml:"chain_id"`
-	Type        string `json:"type"         yaml:"type"` // evm, dag, linear, solana, bitcoin, cosmos
+	Slug    string `json:"slug"         yaml:"slug"`
+	Name    string `json:"name"         yaml:"name"`
+	ChainID int64  `json:"chain_id"     yaml:"chain_id"`
+	Type    string `json:"type"         yaml:"type"` // evm, dag, linear, solana, bitcoin, cosmos
 	// RPC is the address THIS PROCESS dials. In-cluster that is normally a
 	// service-mesh name (luxd-headless.lux-mainnet.svc.cluster.local:9630),
 	// which is correct for the indexer and USELESS to a browser.
@@ -50,9 +51,9 @@ type ChainConfig struct {
 	// while the field was inert, and a plain bool would read a future config
 	// that simply omits the key as "off" and make the chain vanish with no
 	// error. Nil is no opinion; only an explicit `enabled: false` disables.
-	Enabled     *bool  `json:"enabled,omitempty" yaml:"enabled,omitempty"`
-	Default     bool   `json:"default"      yaml:"default"`
-	Source      string `json:"source"       yaml:"-"` // config, env, mdns, admin
+	Enabled *bool  `json:"enabled,omitempty" yaml:"enabled,omitempty"`
+	Default bool   `json:"default"      yaml:"default"`
+	Source  string `json:"source"       yaml:"-"` // config, env, mdns, admin
 
 	Indexer IndexerSettings `json:"indexer,omitempty" yaml:"indexer,omitempty"`
 	Graph   GraphSettings   `json:"graph,omitempty"   yaml:"graph,omitempty"`
@@ -112,6 +113,95 @@ type Network struct {
 // On reports whether the chain should run. Absent means on; only an explicit
 // `enabled: false` turns a chain off.
 func (c ChainConfig) On() bool { return c.Enabled == nil || *c.Enabled }
+
+// Chain reports the first configured chain whose slug the request host spells
+// out. Matches these hostname shapes, in order of specificity:
+//
+//	"{slug}"                             — bare slug (curl localhost)
+//	"{slug}.tld..."                      — zoo.lux.network, hanzo.ai
+//	"explore-{slug}.tld..."              — explore-hanzo.lux.network
+//	"explorer-{slug}.tld..."             — explorer-hanzo.lux.network
+//	"api-explore-{slug}.tld..."          — api-explore-hanzo.lux.network
+//	"explore.{slug}.tld..."              — explore.hanzo.ai, explore.zoo.ngo
+//	"explorer.{slug}.tld..."             — explorer.hanzo.ai, explorer.zoo.network
+//	"api-explore.{slug}.tld..."          — api-explore.hanzo.ai
+//	"explore-{slug}-{env}.tld..."        — explore-hanzo-test.lux.network
+//	"explorer-{slug}-{env}.tld..."       — explorer-hanzo-test.lux.network
+//	"api-explore-{slug}-{env}.tld..."    — api-explore-hanzo-dev.lux.network
+//	"explore.{slug}-{env}.tld..."        — explore.zoo-test.network
+//	"explorer.{slug}-{env}.tld..."       — explorer.zoo-test.network
+//	"api-explore.{slug}-{env}.tld..."    — api-explore.zoo-test.network
+//
+// First chain match wins on ambiguous hosts.
+func (c Config) Chain(host string) (ChainConfig, bool) {
+	host = strings.ToLower(strings.SplitN(host, ":", 2)[0])
+	for _, ch := range c.Chains {
+		if hostMatchesSlug(host, ch.Slug) {
+			return ch, true
+		}
+	}
+	return ChainConfig{}, false
+}
+
+// Serves returns the chain a request on host is answered from: the chain the
+// host names, else the chain marked default, else the first configured chain.
+//
+// One binary answers every brand host, so this is the only thing that decides
+// which chain a request is about. Any surface that reads chain data and does
+// not ask — a stats aggregate pinned at startup, a realtime stream with no
+// filter — reports the default chain's numbers to all five brands, which is
+// how Hanzo's home page came to print Lux's block total above Hanzo's own
+// block heights.
+func (c Config) Serves(host string) ChainConfig {
+	if ch, ok := c.Chain(host); ok {
+		return ch
+	}
+	for _, ch := range c.Chains {
+		if ch.Default {
+			return ch
+		}
+	}
+	if len(c.Chains) > 0 {
+		return c.Chains[0]
+	}
+	return ChainConfig{}
+}
+
+// hostMatchesSlug is the pure string predicate for chain↔host matching.
+// Kept separate from Chain so unit tests can cover it directly.
+func hostMatchesSlug(host, slug string) bool {
+	if slug == "" {
+		return false
+	}
+	if host == slug {
+		return true
+	}
+	// Direct slug-as-subdomain: zoo.lux.network, hanzo.ai.
+	if strings.HasPrefix(host, slug+".") || strings.HasPrefix(host, slug+"-") {
+		return true
+	}
+	// Brand-owned domains: explore.zoo.network, explorer.zoo-test.network,
+	// api-explore.zoo.ngo, etc. Each "explore"/"explorer" prefix combines
+	// with "." or "-" as the slug separator.
+	prefixes := []string{
+		"explore-", "explorer-",
+		"api-explore-", "api-explorer-",
+		"explore.", "explorer.",
+		"api-explore.", "api-explorer.",
+	}
+	for _, p := range prefixes {
+		// {prefix}{slug}.tld  — e.g. explore.zoo.network, explore-zoo.lux.network
+		if strings.HasPrefix(host, p+slug+".") {
+			return true
+		}
+		// {prefix}{slug}-{env}.tld — e.g. explore-zoo-test.lux.network,
+		// explorer.zoo-test.network
+		if strings.HasPrefix(host, p+slug+"-") {
+			return true
+		}
+	}
+	return false
+}
 
 // slugPattern restricts chain slugs to lowercase alphanumeric + hyphen so they
 // remain safe in URL routes (/v1/indexer/{slug}/) and filesystem paths.

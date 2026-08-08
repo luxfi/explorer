@@ -32,12 +32,13 @@ import (
 // chain spawns its workers, removing a chain cancels them.
 type ChainSupervisor struct {
 	dataDir string
+	cfg     Config // resolves a request host to its chain; see Config.Serves
 	mu      sync.Mutex
 	state   map[string]*chainState
 
 	indexerRoutes sync.Map // map[slug]http.Handler
 	graphRoutes   sync.Map // map[slug + "/" + subgraph]http.Handler
-	defaultSlug   string   // serves /v1/indexer/* (no slug prefix)
+	defaultSlug   string   // serves /v1/indexer/* when the host names no chain
 
 	// realtimeHub is the explorer's RealtimeHub. When set (via
 	// AttachRealtime), the supervisor wires each per-chain EVM indexer's
@@ -52,10 +53,11 @@ type chainState struct {
 	wg     sync.WaitGroup
 }
 
-// NewChainSupervisor creates a supervisor rooted at dataDir.
-func NewChainSupervisor(dataDir string) *ChainSupervisor {
+// NewChainSupervisor creates a supervisor rooted at cfg.DataDir.
+func NewChainSupervisor(cfg Config) *ChainSupervisor {
 	return &ChainSupervisor{
-		dataDir: dataDir,
+		dataDir: cfg.DataDir,
+		cfg:     cfg,
 		state:   make(map[string]*chainState),
 	}
 }
@@ -483,7 +485,7 @@ func (s *ChainSupervisor) runSubgraph(ctx context.Context, cfg ChainConfig, sg S
 func (s *ChainSupervisor) dispatchIndexer(w http.ResponseWriter, r *http.Request) {
 	slug, rest, ok := splitSlug(r.URL.Path, "/v1/indexer/")
 	if !ok {
-		s.serveDefault(w, r, "")
+		s.serveHost(w, r, "")
 		return
 	}
 	if h, found := s.indexerRoutes.Load(slug); found {
@@ -494,28 +496,46 @@ func (s *ChainSupervisor) dispatchIndexer(w http.ResponseWriter, r *http.Request
 	if rest != "" {
 		fullTail = slug + "/" + rest
 	}
-	s.serveDefault(w, r, fullTail)
+	s.serveHost(w, r, fullTail)
 }
 
-// serveDefault forwards an unprefixed /v1/indexer/* request to the default
-// chain. The standalone server is mounted under its slug, so we rewrite the
-// URL to include the slug before delegating.
-func (s *ChainSupervisor) serveDefault(w http.ResponseWriter, r *http.Request, rest string) {
-	s.mu.Lock()
-	def := s.defaultSlug
-	s.mu.Unlock()
-	if def == "" {
-		http.Error(w, `{"error":"no default chain"}`, http.StatusNotFound)
+// serveHost forwards a slug-less /v1/indexer/* request to the chain the
+// request host is served. The standalone server is mounted under its slug, so
+// the URL is rewritten to include the slug before delegating.
+//
+// Pinning this to the configured default instead of the host answered Lux's
+// blocks, addresses and tokens on api-explore.hanzo.network and
+// api-explore.zoo.network — the same window of Lux heights, to the block, on
+// all three brands.
+func (s *ChainSupervisor) serveHost(w http.ResponseWriter, r *http.Request, rest string) {
+	slug := s.hostSlug(r.Host)
+	if slug == "" {
+		http.Error(w, `{"error":"no chain for host"}`, http.StatusNotFound)
 		return
 	}
-	h, ok := s.indexerRoutes.Load(def)
+	h, ok := s.indexerRoutes.Load(slug)
 	if !ok {
 		http.Error(w, `{"error":"chain not ready"}`, http.StatusServiceUnavailable)
 		return
 	}
 	r2 := r.Clone(r.Context())
-	r2.URL.Path = "/v1/indexer/" + def + "/" + strings.TrimPrefix(rest, "/")
+	r2.URL.Path = "/v1/indexer/" + slug + "/" + strings.TrimPrefix(rest, "/")
 	h.(http.Handler).ServeHTTP(w, r2)
+}
+
+// hostSlug is the chain a slug-less request is answered from: the chain the
+// host names, when that chain is running, else the default. Chains can be
+// added and removed at runtime, so a host naming a chain that is not up falls
+// back rather than 404ing.
+func (s *ChainSupervisor) hostSlug(host string) string {
+	if c, ok := s.cfg.Chain(host); ok {
+		if _, running := s.indexerRoutes.Load(c.Slug); running {
+			return c.Slug
+		}
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.defaultSlug
 }
 
 // dispatchExplorerLegacy preserves the older /v1/explorer/{slug}/* prefix

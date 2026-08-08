@@ -8,52 +8,35 @@ import (
 	"time"
 )
 
-// SSE endpoints — Server-Sent Events at the URLs the bundled Vite SPA
-// expects (/blocks, /transactions, /token-transfers, /internal-txs,
-// /tokens, /gas-tracker, /stats, /validators).
+// Server-Sent Events. One endpoint, GET /v1/base/realtime, carrying every hub
+// broadcast for one chain in one envelope:
 //
-// Why this exists (2026-05-21):
+//	event: CONNECT     (once, on open)
+//	data: {}
 //
-// The SPA opens EventSource against `${window.location.origin}/<channel>`
-// expecting `text/event-stream`. The Go backend previously had no
-// handler for those paths, so every request fell through to the SPA's
-// own static fallback (`handleSPA` → index.html), returning
-// `text/html`. Browser console then logged:
+//	data: {"event":"<channel>","chain":"<slug>","data":<payload>}
 //
-//     EventSource's response has a MIME type ("text/html") that is not
-//     "text/event-stream". Aborting the connection.
+//	: ping             (keep-alive every 30s)
 //
-// …for every channel, on every page load. PR #4 silenced the HEAD
-// pre-flight (so the SPA cleanly disabled itself). This file goes the
-// other direction: make the SSE endpoints REAL, so the SPA opens them,
-// gets a proper `text/event-stream` reply, stays connected, and
-// receives broadcasts.
+// The SPA opens exactly one EventSource and routes frames off the envelope's
+// `event` field, so there is nothing to gain from a stream per channel — and
+// the per-channel endpoints that used to live here were mounted at bare
+// /blocks, /tokens, /stats, /validators, which are SPA page paths. A mux
+// serving both cannot serve either.
 //
-// Wire shape:
-//   - GET  /blocks                      → SSE for hub channel "blocks"
-//   - GET  /transactions                → SSE for hub channel "transactions"
-//   - GET  /token-transfers             → SSE for hub channel "token_transfers"
-//   - GET  /internal-txs                → SSE for hub channel "internal_transactions"
-//   - GET  /tokens, /gas-tracker, /validators → SSE that stays open with
-//     keep-alive pings; no broadcasters yet (placeholder so the SPA
-//     channel doesn't show as broken)
-//   - GET  /stats                       → SSE that emits the hub.Stats()
-//     map every 5s — cheap server-side state, useful liveness signal
-//   - HEAD <any>                        → 200 + the same headers so the
-//     SPA pre-flight (`fetch(url, {method: HEAD}).then(r => r.ok)`)
-//     succeeds before opening EventSource.
+// HEAD is answered too: the SPA pre-flights with
+// `fetch(url, {method: HEAD}).then(r => r.ok)` and net/http's ServeMux would
+// otherwise answer 405 on a GET-only route, which reads as a dead channel.
 //
-// Each connected client gets its own bounded channel. Slow consumers
-// drop messages rather than back-pressure the hub; the SPA refreshes
-// stale state via REST on reconnect.
+// Each connected client gets its own bounded queue. Slow consumers drop
+// messages rather than back-pressure the hub; the SPA refreshes stale state
+// via REST on reconnect.
 
-// sseClient is a single SSE subscriber. One per connected browser per
-// channel (the SPA opens one EventSource per channel it wants to follow).
+// sseClient is a single SSE subscriber — one per connected browser.
 type sseClient struct {
-	channel string        // hub event-type to receive ("blocks" / "transactions" / ...)
-	chain   string        // optional chain filter; "" = unscoped
-	events  chan []byte   // buffered outbound queue; full → drop
-	done    chan struct{} // closed when the client disconnects
+	chain  string        // the only chain this subscriber receives
+	events chan []byte   // buffered outbound queue; full → drop
+	done   chan struct{} // closed when the client disconnects
 }
 
 // sseRegistry holds the live SSE clients. Kept separate from the
@@ -81,144 +64,35 @@ func (r *sseRegistry) detach(c *sseClient) {
 	close(c.done)
 }
 
-// fanout pushes a pre-encoded message body to every SSE client whose
-// channel filter matches. Called from RealtimeHub.Broadcast.
-//
-// Match policy mirrors the WebSocket subs lookup:
-//   - exact channel match (client.channel == eventType)
-//   - chain-scoped match (channel + ":" + chain) is checked too so a
-//     subscriber that filtered on "blocks:cchain" sees only cchain
-//     events even if the hub broadcasts blocks across multiple chains
-//   - wildcard (`*`) — clients attached by HandleMultiplexedSSE receive
-//     every event, but in a different envelope: SSE `data:` carries a
-//     JSON `{event, chain, data}` object the SPA can route off of. The
-//     wildcard `body` is built here; per-channel clients keep using the
-//     prebuilt per-channel framing from Broadcast for cheap reuse.
-func (r *sseRegistry) fanout(eventType, chain string, body []byte, wildcardEnvelope []byte) {
+// fanout pushes one pre-encoded envelope to every SSE subscriber of `chain`.
+// Called from RealtimeHub.Broadcast, which encodes the frame once.
+func (r *sseRegistry) fanout(chain string, envelope []byte) {
+	if envelope == nil {
+		return
+	}
 	r.mu.RLock()
 	defer r.mu.RUnlock()
 	for c := range r.clients {
-		var payload []byte
-		switch {
-		case c.channel == "*":
-			payload = wildcardEnvelope
-		case c.channel == eventType:
-			payload = body
-		default:
-			continue
-		}
-		if c.chain != "" && c.chain != chain {
-			continue
-		}
-		if payload == nil {
+		if c.chain != chain {
 			continue
 		}
 		select {
-		case c.events <- payload:
+		case c.events <- envelope:
 		default:
 			// Slow consumer — drop this event rather than block.
 		}
 	}
 }
 
-// HandleSSE returns an http.HandlerFunc bound to a specific channel
-// name. main.go mounts one per path.
-func (h *RealtimeHub) HandleSSE(channel string) http.HandlerFunc {
-	return func(w http.ResponseWriter, r *http.Request) {
-		// HEAD pre-flight: GCP HTTP/2 LB + Traefik can 502 on HEAD
-		// responses that carry `Connection: keep-alive` together with
-		// a streaming content-type. Keep the HEAD response minimal —
-		// the SPA only checks `r.ok` (status) anyway.
-		if r.Method == http.MethodHead {
-			w.Header().Set("Content-Type", "text/event-stream")
-			w.WriteHeader(http.StatusOK)
-			return
-		}
-
-		// SSE response headers for the actual GET stream.
-		w.Header().Set("Content-Type", "text/event-stream")
-		w.Header().Set("Cache-Control", "no-cache")
-		w.Header().Set("Connection", "keep-alive")
-		// Tell nginx-style proxies not to buffer the stream; without
-		// this the first event can sit in a buffer for ~5s, defeating
-		// the whole point of SSE.
-		w.Header().Set("X-Accel-Buffering", "no")
-
-		flusher, ok := w.(http.Flusher)
-		if !ok {
-			// Should be impossible on Go's net/http; defensive.
-			http.Error(w, "streaming unsupported", http.StatusInternalServerError)
-			return
-		}
-
-		// Subscribe to the registry. `chain` query param is optional;
-		// blank = no chain filter, see fanout()'s match policy.
-		client := &sseClient{
-			channel: channel,
-			chain:   strings.TrimSpace(r.URL.Query().Get("chain")),
-			events:  make(chan []byte, 64),
-			done:    make(chan struct{}),
-		}
-		h.sse.attach(client)
-		defer h.sse.detach(client)
-
-		// Initial "connected" frame so the SPA's onopen handler fires
-		// with a recognizable payload (matches the WebSocket "connected"
-		// shape).
-		writeSSE(w, flusher, "connected", []byte(`{}`))
-
-		// Keep-alive ticker. Comment lines (`: ping`) don't fire the
-		// EventSource onmessage handler but keep the TCP/TLS connection
-		// alive through middleboxes that idle-timeout at 30s.
-		keepAlive := time.NewTicker(30 * time.Second)
-		defer keepAlive.Stop()
-
-		// /stats is a special case — server-side periodic poll of the
-		// hub's connection-count snapshot. Useful liveness signal even
-		// when no hub broadcasts have been wired up yet.
-		var statsTicker *time.Ticker
-		if channel == "stats" {
-			statsTicker = time.NewTicker(5 * time.Second)
-			defer statsTicker.Stop()
-		}
-
-		ctx := r.Context()
-		for {
-			select {
-			case <-ctx.Done():
-				return
-			case <-client.done:
-				return
-			case <-keepAlive.C:
-				if _, err := w.Write([]byte(": ping\n\n")); err != nil {
-					return
-				}
-				flusher.Flush()
-			case msg := <-client.events:
-				// Broadcast messages are already JSON-encoded by the
-				// hub; we just prefix with the SSE framing.
-				if _, err := w.Write(msg); err != nil {
-					return
-				}
-				flusher.Flush()
-			default:
-				if statsTicker != nil {
-					select {
-					case <-statsTicker.C:
-						// Synthesize a stats event from the hub.
-						stats := fmt.Sprintf(
-							`{"connections":%d,"subscriptions":%d}`,
-							len(h.clients), len(h.sse.clients),
-						)
-						writeSSE(w, flusher, "stats", []byte(stats))
-						continue
-					default:
-					}
-				}
-				time.Sleep(50 * time.Millisecond)
-			}
-		}
+// streamChain is the chain an SSE subscriber receives: whatever `?chain=`
+// asks for, else the chain the request host is served. Never empty, because
+// an empty filter means "every chain the hub broadcasts" and no brand host
+// wants another brand's blocks.
+func streamChain(cfg Config, r *http.Request) string {
+	if q := strings.TrimSpace(r.URL.Query().Get("chain")); q != "" {
+		return q
 	}
+	return cfg.Serves(r.Host).Slug
 }
 
 // writeSSE emits one SSE event frame:
@@ -250,10 +124,14 @@ func writeSSE(w http.ResponseWriter, flusher http.Flusher, event string, payload
 //
 // So the SPA gets ONE EventSource and receives all event types over it,
 // instead of opening N parallel streams. This is the canonical realtime
-// channel — the per-channel /blocks /transactions /etc. endpoints stay
-// for backward compatibility and external consumers, but the SPA uses
-// only this one.
-func (h *RealtimeHub) HandleMultiplexedSSE() http.HandlerFunc {
+// channel.
+//
+// The stream carries one chain: the one `cfg` says the request host is served,
+// unless `?chain=` names another. One binary indexes five chains and broadcasts
+// all of them onto this hub, so an unfiltered stream handed Hanzo's browser
+// Lux and Zoo blocks, which the SPA appended to Hanzo's list — 63 rows for a
+// 50-row page, 2 Lux on top and 8 Zoo at the bottom.
+func (h *RealtimeHub) HandleMultiplexedSSE(cfg Config) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		// HEAD pre-flight: keep the response brief — GCP HTTP/2 load
 		// balancers (and Traefik in some configs) 502 when a HEAD
@@ -278,15 +156,10 @@ func (h *RealtimeHub) HandleMultiplexedSSE() http.HandlerFunc {
 			return
 		}
 
-		// Subscribe to ALL channels by registering a wildcard client.
-		// The empty `channel` means fanout() needs special handling — we
-		// use a sentinel "*" so we don't accidentally collide with a real
-		// channel called "" elsewhere.
 		client := &sseClient{
-			channel: "*",
-			chain:   strings.TrimSpace(r.URL.Query().Get("chain")),
-			events:  make(chan []byte, 128),
-			done:    make(chan struct{}),
+			chain:  streamChain(cfg, r),
+			events: make(chan []byte, 128),
+			done:   make(chan struct{}),
 		}
 		h.sse.attach(client)
 		defer h.sse.detach(client)

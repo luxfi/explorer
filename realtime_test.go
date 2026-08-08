@@ -199,3 +199,70 @@ func TestRealtimeStatsEndpoint(t *testing.T) {
 		t.Fatalf("expected 0 connections, got %d", stats["connections"])
 	}
 }
+
+// The realtime stream carries the chain of the host it was opened on, and
+// nothing else. One binary indexes five chains and broadcasts all of them onto
+// one hub; an unscoped stream put Lux and Zoo blocks into Hanzo's block list,
+// which is how a 50-block page rendered 63 rows.
+func TestRealtimeStreamCarriesOnlyTheHostsChain(t *testing.T) {
+	cfg := Config{Chains: []ChainConfig{
+		{Slug: "cchain", Default: true},
+		{Slug: "hanzo"},
+		{Slug: "zoo"},
+	}}
+	hub := NewRealtimeHub()
+
+	mux := http.NewServeMux()
+	mux.HandleFunc("GET /v1/base/realtime", hub.HandleMultiplexedSSE(cfg))
+	ts := httptest.NewServer(mux)
+	defer ts.Close()
+
+	for _, tc := range []struct {
+		host string
+		want string
+	}{
+		{"api-explore.hanzo.network", "hanzo"},
+		{"explore.zoo.network", "zoo"},
+		{"api-explore.lux.network", "cchain"}, // names no chain -> the default
+	} {
+		req, err := http.NewRequest(http.MethodGet, ts.URL+"/v1/base/realtime", nil)
+		if err != nil {
+			t.Fatal(err)
+		}
+		req.Host = tc.host
+		resp, err := http.DefaultClient.Do(req)
+		if err != nil {
+			t.Fatal(err)
+		}
+
+		// Read past the CONNECT frame so the subscriber is attached before the
+		// broadcasts go out — attaching is what decides which chain it sees.
+		buf := make([]byte, 4096)
+		if _, err := resp.Body.Read(buf); err != nil {
+			t.Fatalf("%s: CONNECT: %v", tc.host, err)
+		}
+
+		for _, chain := range []string{"cchain", "hanzo", "zoo"} {
+			hub.Broadcast("blocks", chain, map[string]any{"number": 1, "chain": chain})
+		}
+
+		frame := make([]byte, 4096)
+		n, err := resp.Body.Read(frame)
+		if err != nil {
+			t.Fatalf("%s: read: %v", tc.host, err)
+		}
+		got := string(frame[:n])
+		if !strings.Contains(got, `"chain":"`+tc.want+`"`) {
+			t.Errorf("%s: first frame is not %s: %s", tc.host, tc.want, got)
+		}
+		for _, other := range []string{"cchain", "hanzo", "zoo"} {
+			if other == tc.want {
+				continue
+			}
+			if strings.Contains(got, `"chain":"`+other+`"`) {
+				t.Errorf("%s: stream carried %s: %s", tc.host, other, got)
+			}
+		}
+		resp.Body.Close()
+	}
+}
