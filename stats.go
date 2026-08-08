@@ -144,10 +144,18 @@ func (s *StatsService) count(db *sql.DB, table string) int64 {
 // avgBlockTimeSec returns the lifetime average block interval in seconds,
 // derived from the full timestamp span so it stays meaningful on a sparse,
 // demand-driven chain (per-window deltas collapse to zero when idle).
+//
+// Only blocks that carry a time are counted. A single row whose timestamp
+// parses to epoch 0 anchors the span at 1970 and swallows the whole index:
+// Hanzo has one, and it turned a chain producing a block every 11 seconds into
+// a reported 58,370 — 30,602 blocks over an apparent 56 years. Zoo has one
+// too, reading 2,389 for the same 11-second cadence. Excluding them is not a
+// threshold, it is a definition: a block with no time cannot bound a span, and
+// counting it invents the interval it appears to measure.
 func (s *StatsService) avgBlockTimeSec(db *sql.DB) float64 {
 	var count, minTS, maxTS int64
 	err := db.QueryRow(`SELECT COUNT(*), COALESCE(MIN(`+blockEpoch+`),0), COALESCE(MAX(`+blockEpoch+`),0)
-		FROM evm_blocks b`).Scan(&count, &minTS, &maxTS)
+		FROM evm_blocks b WHERE `+blockEpoch+` > 0`).Scan(&count, &minTS, &maxTS)
 	if err != nil {
 		// Say WHY. Swallowing this is how the tile read "0.0 s" on a chain with
 		// 1.1M blocks: the scan failed on every request and the zero value went

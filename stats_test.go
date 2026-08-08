@@ -286,3 +286,25 @@ func TestPagesTransactions24h(t *testing.T) {
 		t.Errorf("transactions_24h = %q, want 3 (the 9-day-old transaction is outside the window)", got)
 	}
 }
+
+// One block with no time must not become the whole chain's history. Hanzo has
+// exactly this row: it anchored the span at 1970 and reported 58,370 seconds
+// per block on a chain building one every 11.
+func TestAverageBlockTimeIgnoresATimelessBlock(t *testing.T) {
+	dir := t.TempDir()
+	writeIndexerDB(t, dir, "cchain", 5) // five blocks, one minute apart
+	db, err := sql.Open("sqlite3", filepath.Join(dir, "cchain", "query", "indexer.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.Exec(`INSERT INTO evm_blocks(id,number,timestamp,tx_count) VALUES('0xz',999,?,0)`,
+		time.Unix(0, 0).UTC()); err != nil {
+		t.Fatal(err)
+	}
+	db.Close()
+
+	body := get(t, NewStatsService(dir, statsChains).handleStats, "api-explore.lux.network", "/v1/stats")
+	if got := body["average_block_time"].(float64); got != 60 {
+		t.Errorf("average_block_time = %v, want 60 — the 1970 row is not a block time", got)
+	}
+}
