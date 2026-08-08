@@ -145,17 +145,25 @@ func (s *StatsService) count(db *sql.DB, table string) int64 {
 // derived from the full timestamp span so it stays meaningful on a sparse,
 // demand-driven chain (per-window deltas collapse to zero when idle).
 //
-// Only blocks that carry a time are counted. A single row whose timestamp
-// parses to epoch 0 anchors the span at 1970 and swallows the whole index:
-// Hanzo has one, and it turned a chain producing a block every 11 seconds into
-// a reported 58,370 — 30,602 blocks over an apparent 56 years. Zoo has one
-// too, reading 2,389 for the same 11-second cadence. Excluding them is not a
-// threshold, it is a definition: a block with no time cannot bound a span, and
-// counting it invents the interval it appears to measure.
+// The span is measured between the FIRST and LAST block by number, not by
+// MIN and MAX of the timestamp column. Timestamps are monotonic in block order
+// by consensus rule, so the two agree on a sound index — and disagree loudly
+// on a damaged one, where MIN/MAX hands a single stray row the whole history.
+// Hanzo carries a block that parses to epoch 0: MIN/MAX anchored the span at
+// 1970 and reported 58,370 seconds per block on a chain that builds one every
+// ten. Zoo carries one dated 1.76 years before its own first block, and read
+// 2,387. Both are one row out of tens of thousands, and neither is the
+// interval between blocks.
+//
+// Blocks with no time at all are skipped: a block that does not say when it
+// happened cannot bound how far apart blocks are.
 func (s *StatsService) avgBlockTimeSec(db *sql.DB) float64 {
 	var count, minTS, maxTS int64
-	err := db.QueryRow(`SELECT COUNT(*), COALESCE(MIN(`+blockEpoch+`),0), COALESCE(MAX(`+blockEpoch+`),0)
-		FROM evm_blocks b WHERE `+blockEpoch+` > 0`).Scan(&count, &minTS, &maxTS)
+	err := db.QueryRow(`SELECT
+		(SELECT COUNT(*) FROM evm_blocks b WHERE `+blockEpoch+` > 0),
+		COALESCE((SELECT `+blockEpoch+` FROM evm_blocks b WHERE `+blockEpoch+` > 0 ORDER BY number ASC LIMIT 1), 0),
+		COALESCE((SELECT `+blockEpoch+` FROM evm_blocks b WHERE `+blockEpoch+` > 0 ORDER BY number DESC LIMIT 1), 0)`).
+		Scan(&count, &minTS, &maxTS)
 	if err != nil {
 		// Say WHY. Swallowing this is how the tile read "0.0 s" on a chain with
 		// 1.1M blocks: the scan failed on every request and the zero value went

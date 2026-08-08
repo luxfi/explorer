@@ -287,24 +287,40 @@ func TestPagesTransactions24h(t *testing.T) {
 	}
 }
 
-// One block with no time must not become the whole chain's history. Hanzo has
-// exactly this row: it anchored the span at 1970 and reported 58,370 seconds
-// per block on a chain building one every 11.
-func TestAverageBlockTimeIgnoresATimelessBlock(t *testing.T) {
-	dir := t.TempDir()
-	writeIndexerDB(t, dir, "cchain", 5) // five blocks, one minute apart
-	db, err := sql.Open("sqlite3", filepath.Join(dir, "cchain", "query", "indexer.db"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	if _, err := db.Exec(`INSERT INTO evm_blocks(id,number,timestamp,tx_count) VALUES('0xz',999,?,0)`,
-		time.Unix(0, 0).UTC()); err != nil {
-		t.Fatal(err)
-	}
-	db.Close()
+// One stray row must not become the whole chain's history. Both of these are
+// real: Hanzo carries a block that parses to epoch 0 and reported 58,370
+// seconds per block; Zoo carries one dated well before its own first block and
+// reported 2,387. The chain builds one every ten seconds in both cases.
+func TestAverageBlockTimeSurvivesAStrayRow(t *testing.T) {
+	for _, tc := range []struct {
+		name  string
+		stray time.Time
+	}{
+		{"a block with no time at all", time.Unix(0, 0).UTC()},
+		{"a block dated years before the first", time.Now().AddDate(-2, 0, 0)},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			dir := t.TempDir()
+			writeIndexerDB(t, dir, "cchain", 5) // five blocks, one minute apart
+			db, err := sql.Open("sqlite3", filepath.Join(dir, "cchain", "query", "indexer.db"))
+			if err != nil {
+				t.Fatal(err)
+			}
+			// Numbered in the middle of the run, the way a damaged row sits in a
+			// real index — not at either end, where it would be the boundary.
+			if _, err := db.Exec(`INSERT INTO evm_blocks(id,number,timestamp,tx_count) VALUES('0xz',3,?,0)`,
+				tc.stray); err != nil {
+				t.Fatal(err)
+			}
+			db.Close()
 
-	body := get(t, NewStatsService(dir, statsChains).handleStats, "api-explore.lux.network", "/v1/stats")
-	if got := body["average_block_time"].(float64); got != 60 {
-		t.Errorf("average_block_time = %v, want 60 — the 1970 row is not a block time", got)
+			body := get(t, NewStatsService(dir, statsChains).handleStats, "api-explore.lux.network", "/v1/stats")
+			got := body["average_block_time"].(float64)
+			// Five blocks a minute apart span four minutes; the stray row adds one
+			// more block to the count without extending the span.
+			if got < 40 || got > 60 {
+				t.Errorf("average_block_time = %v, want the real ~48-60s cadence", got)
+			}
+		})
 	}
 }
