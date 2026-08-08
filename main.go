@@ -93,7 +93,7 @@ func main() {
 	go func() { <-sigCh; log.Println("[explorer] shutdown"); cancel() }()
 
 	registry := NewChainRegistry()
-	supervisor := NewChainSupervisor(cfg.DataDir)
+	supervisor := NewChainSupervisor(cfg)
 	registry.AttachSupervisor(supervisor)
 	// Bridge indexer block events into the realtime hub so WebSocket +
 	// SSE subscribers see new blocks as they're ingested. Must happen
@@ -136,17 +136,11 @@ func main() {
 	})
 
 	// Blockscout stats-microservice surface (/v1/counters, /v1/lines,
-	// /v1/lines/{id}, /v1/pages/*) for the default chain. The Next.js /stats page
-	// enables these when NEXT_PUBLIC_STATS_API_HOST is set and shows error banners
-	// without them; served from the default chain's live indexer SQLite DB.
-	statsSlug := "cchain"
-	for _, c := range cfg.Chains {
-		if c.Default {
-			statsSlug = c.Slug
-			break
-		}
-	}
-	NewStatsService(filepath.Join(cfg.DataDir, statsSlug, "query", "indexer.db")).Mount(mux)
+	// /v1/lines/{id}, /v1/pages/*). The Next.js /stats page enables these when
+	// NEXT_PUBLIC_STATS_API_HOST is set and shows error banners without them;
+	// each answer is read from the live indexer SQLite DB of the chain the
+	// request host is served.
+	NewStatsService(cfg.DataDir, cfg).Mount(mux)
 
 	mux.HandleFunc("GET /v1/explorer/admin/chains", registry.HandleList)
 	mux.HandleFunc("POST /v1/explorer/admin/chains", registry.HandleAdd)
@@ -159,34 +153,16 @@ func main() {
 		json.NewEncoder(w).Encode(registry.hub.Stats())
 	})
 
-	// /v1/base/realtime — multiplexed SSE channel the bundled SPA opens.
-	// One stream carries every broadcast in a JSON envelope `{event, chain, data}`
-	// that the SPA routes off via its handler map. See realtime_sse.go.
-	muxRealtimeSSE := registry.hub.HandleMultiplexedSSE()
-	mux.HandleFunc("GET /v1/base/realtime", muxRealtimeSSE)
-	mux.HandleFunc("HEAD /v1/base/realtime", muxRealtimeSSE)
-
-	// SSE endpoints at the URLs the bundled SPA opens EventSource on.
-	// See realtime_sse.go for the channel mapping + the back-story on
-	// why each path needs its own handler. Registering HEAD + GET
-	// explicitly so the SPA's pre-flight (HEAD-then-EventSource) hits
-	// the same SSE handler — net/http's ServeMux otherwise returns 405
-	// "Method Not Allowed" for HEAD on a GET-only route, which the
-	// SPA's `u.ok` check would reject and disable the channel.
-	for path, channel := range map[string]string{
-		"/blocks":          "blocks",
-		"/transactions":    "transactions",
-		"/token-transfers": "token_transfers",
-		"/internal-txs":    "internal_transactions",
-		"/tokens":          "tokens",
-		"/gas-tracker":     "gas_tracker",
-		"/validators":      "validators",
-		"/stats":           "stats",
-	} {
-		h := registry.hub.HandleSSE(channel)
-		mux.HandleFunc("GET "+path, h)
-		mux.HandleFunc("HEAD "+path, h)
-	}
+	// /v1/base/realtime — the multiplexed SSE channel, and the only one the SPA
+	// opens. One stream carries every broadcast for the host's chain in a JSON
+	// envelope `{event, chain, data}` that the SPA routes off via its handler
+	// map. HEAD is registered explicitly so the SPA's pre-flight
+	// (HEAD-then-EventSource) reaches the same handler; net/http's ServeMux
+	// answers 405 for HEAD on a GET-only route, which the SPA's `r.ok` check
+	// reads as a dead channel. See realtime_sse.go.
+	realtime := registry.hub.HandleMultiplexedSSE(cfg)
+	mux.HandleFunc("GET /v1/base/realtime", realtime)
+	mux.HandleFunc("HEAD /v1/base/realtime", realtime)
 
 	supervisor.MountRoutes(mux)
 	frontend.Mount(mux)

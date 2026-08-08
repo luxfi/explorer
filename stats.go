@@ -6,14 +6,15 @@ import (
 	"fmt"
 	"log"
 	"net/http"
+	"path/filepath"
 	"strconv"
 	"sync"
 	"time"
 )
 
 // StatsService serves the Blockscout stats-microservice API surface
-// (/v1/counters, /v1/lines, /v1/lines/{id}, /v1/pages/*) for the default chain,
-// backed directly by the live indexer SQLite DB.
+// (/v1/counters, /v1/lines, /v1/lines/{id}, /v1/pages/*), backed directly by
+// the live indexer SQLite DB of whichever chain the request host names.
 //
 // The Next.js explorer turns on config.features.stats when
 // NEXT_PUBLIC_STATS_API_HOST is set (it points at this backend). Its /stats page
@@ -23,27 +24,30 @@ import (
 // is a different shape and its chart endpoints are empty stubs, so we serve real
 // aggregates here, computed from evm_blocks / evm_transactions / evm_addresses.
 type StatsService struct {
-	dbPath string
-	mu     sync.Mutex
-	db     *sql.DB
+	dataDir string
+	cfg     Config
+	mu      sync.Mutex
+	dbs     map[string]*sql.DB
 }
 
-// NewStatsService targets the default chain's indexer DB
-// ({dataDir}/{slug}/query/indexer.db).
-func NewStatsService(dbPath string) *StatsService {
-	return &StatsService{dbPath: dbPath}
+// NewStatsService reads each chain's indexer DB at {dataDir}/{slug}/query/indexer.db.
+func NewStatsService(dataDir string, cfg Config) *StatsService {
+	return &StatsService{dataDir: dataDir, cfg: cfg, dbs: make(map[string]*sql.DB)}
 }
 
-// conn lazily opens a read-only handle. The indexer writes in WAL mode, so a
+// conn lazily opens a read-only handle to the DB of the chain the request host
+// is served, one handle per chain. The indexer writes in WAL mode, so a
 // read-only reader never blocks ingestion. The DB may not exist until the
 // indexer has created it, so open is retried per-request until it succeeds.
-func (s *StatsService) conn() (*sql.DB, error) {
+func (s *StatsService) conn(r *http.Request) (*sql.DB, error) {
+	slug := s.cfg.Serves(r.Host).Slug
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	if s.db != nil {
-		return s.db, nil
+	if db, ok := s.dbs[slug]; ok {
+		return db, nil
 	}
-	db, err := sql.Open("sqlite3", "file:"+s.dbPath+"?mode=ro&_busy_timeout=3000")
+	path := filepath.Join(s.dataDir, slug, "query", "indexer.db")
+	db, err := sql.Open("sqlite3", "file:"+path+"?mode=ro&_busy_timeout=3000")
 	if err != nil {
 		return nil, err
 	}
@@ -52,7 +56,7 @@ func (s *StatsService) conn() (*sql.DB, error) {
 		db.Close()
 		return nil, err
 	}
-	s.db = db
+	s.dbs[slug] = db
 	return db, nil
 }
 
@@ -113,6 +117,23 @@ func writeJSON(w http.ResponseWriter, code int, v any) {
 
 // ---- Aggregate helpers ----
 
+// evm_blocks.timestamp is a column declared TIMESTAMP that the indexer fills by
+// binding a Go time.Time, so SQLite stores a datetime STRING — never an
+// integer. Reading it as an epoch is what silently emptied every chart on
+// /stats: CAST('2026-08-08 12:55:22+00:00' AS INTEGER) is 2026 (SQLite takes
+// the leading numeric prefix), and strftime with the 'unixepoch' modifier
+// returns NULL because that modifier wants a number. strftime parses the
+// string, applies its timezone, and answers in UTC. These are the only two
+// spellings allowed to touch that column.
+//
+// Both name the column as `b.timestamp`, so every query below aliases
+// evm_blocks to b — evm_transactions carries a timestamp too, and an
+// unqualified reference is ambiguous the moment the two are joined.
+const (
+	blockEpoch = `CAST(strftime('%s', b.timestamp) AS INTEGER)`
+	blockDay   = `strftime('%Y-%m-%d', b.timestamp)`
+)
+
 func (s *StatsService) count(db *sql.DB, table string) int64 {
 	var n int64
 	// #nosec G201 — table is a fixed internal identifier, never user input.
@@ -125,8 +146,15 @@ func (s *StatsService) count(db *sql.DB, table string) int64 {
 // demand-driven chain (per-window deltas collapse to zero when idle).
 func (s *StatsService) avgBlockTimeSec(db *sql.DB) float64 {
 	var count, minTS, maxTS int64
-	db.QueryRow("SELECT COUNT(*), COALESCE(MIN(timestamp),0), COALESCE(MAX(timestamp),0) FROM evm_blocks").
-		Scan(&count, &minTS, &maxTS)
+	err := db.QueryRow(`SELECT COUNT(*), COALESCE(MIN(`+blockEpoch+`),0), COALESCE(MAX(`+blockEpoch+`),0)
+		FROM evm_blocks b`).Scan(&count, &minTS, &maxTS)
+	if err != nil {
+		// Say WHY. Swallowing this is how the tile read "0.0 s" on a chain with
+		// 1.1M blocks: the scan failed on every request and the zero value went
+		// out as if it were the answer.
+		log.Printf("stats: average block time unavailable: %v", err)
+		return 0
+	}
 	if count < 2 || maxTS <= minTS {
 		return 0
 	}
@@ -134,7 +162,6 @@ func (s *StatsService) avgBlockTimeSec(db *sql.DB) float64 {
 }
 
 // dailySeries buckets a COUNT by UTC day over the trailing `days` window.
-// timestamp is a unix-epoch integer, so strftime needs the 'unixepoch' modifier.
 func (s *StatsService) dailySeries(db *sql.DB, query string, days int) ([]statsPoint, error) {
 	since := time.Now().AddDate(0, 0, -days).Unix()
 	rows, err := db.Query(query, since)
@@ -154,10 +181,22 @@ func (s *StatsService) dailySeries(db *sql.DB, query string, days int) ([]statsP
 	return points, rows.Err()
 }
 
+// blocksPerDay and txsPerDay are the two daily aggregates this service serves.
+// Both bound the window on the epoch expression: comparing the datetime string
+// against an integer bound is not just imprecise, SQLite orders every INTEGER
+// below every TEXT, so `timestamp > 1754…` matched all 1.1M rows.
+const (
+	blocksPerDay = `SELECT ` + blockDay + ` d, COUNT(*) FROM evm_blocks b
+		WHERE ` + blockEpoch + ` > ? GROUP BY d ORDER BY d`
+	txsPerDay = `SELECT ` + blockDay + ` d, COUNT(*)
+		FROM evm_transactions t JOIN evm_blocks b ON t.block_number = b.number
+		WHERE ` + blockEpoch + ` > ? GROUP BY d ORDER BY d`
+)
+
 // ---- Handlers ----
 
 func (s *StatsService) handleCounters(w http.ResponseWriter, r *http.Request) {
-	db, err := s.conn()
+	db, err := s.conn(r)
 	if err != nil {
 		writeJSON(w, http.StatusOK, map[string]any{"counters": []statsCounter{}})
 		return
@@ -211,24 +250,19 @@ func (s *StatsService) handleLine(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusNotFound, map[string]any{"error": "unknown chart"})
 		return
 	}
-	db, err := s.conn()
+	db, err := s.conn(r)
 	if err != nil {
 		writeJSON(w, http.StatusOK, statsLineChart{Chart: []statsPoint{}, Info: info})
 		return
 	}
 
-	var query string
-	switch id {
-	case "newBlocksPerDay":
-		query = `SELECT strftime('%Y-%m-%d', timestamp, 'unixepoch') d, COUNT(*)
-			FROM evm_blocks WHERE timestamp > ? GROUP BY d ORDER BY d`
-	case "newTxnsPerDay":
-		query = `SELECT strftime('%Y-%m-%d', b.timestamp, 'unixepoch') d, COUNT(*)
-			FROM evm_transactions t JOIN evm_blocks b ON t.block_number = b.number
-			WHERE b.timestamp > ? GROUP BY d ORDER BY d`
+	query := blocksPerDay
+	if id == "newTxnsPerDay" {
+		query = txsPerDay
 	}
 	points, err := s.dailySeries(db, query, 365)
 	if err != nil {
+		log.Printf("stats: chart %s failed: %v", id, err)
 		writeJSON(w, http.StatusOK, statsLineChart{Chart: []statsPoint{}, Info: info})
 		return
 	}
@@ -241,7 +275,7 @@ func (s *StatsService) handleLine(w http.ResponseWriter, r *http.Request) {
 // That comparison is the only honest way to tell whether the index is current —
 // an HTTP 200 from the explorer proves nothing about whether it has the chain.
 func (s *StatsService) handleStats(w http.ResponseWriter, r *http.Request) {
-	db, err := s.conn()
+	db, err := s.conn(r)
 	if err != nil {
 		// No DB yet is a real state (fresh chain, indexer still starting), not
 		// an error. Report zeroes and say so, rather than 500ing a health check.
@@ -276,21 +310,21 @@ func (s *StatsService) handleBlocks(w http.ResponseWriter, r *http.Request) {
 	if limit > 200 {
 		limit = 200 // bound the page; an unbounded LIMIT is a DoS on a big index
 	}
-	db, err := s.conn()
+	db, err := s.conn(r)
 	if err != nil {
 		writeJSON(w, http.StatusOK, map[string]any{"blocks": []any{}, "indexed": false})
 		return
 	}
-	// CAST(timestamp AS INTEGER) on purpose: the real schema declares the column
-	// TIMESTAMP, and go-sqlite3 converts declared TIMESTAMP/DATETIME columns to
-	// time.Time, which will not Scan into an int64 — every row would be skipped
-	// and the endpoint would answer an empty list on a fully populated index.
-	// The CAST makes the wire type independent of the declared type.
+	// blockEpoch, not a bare read: go-sqlite3 converts a column declared
+	// TIMESTAMP to time.Time, which will not Scan into an int64 — every row
+	// would be skipped and the endpoint would answer an empty list on a fully
+	// populated index. It parses the stored datetime rather than casting it,
+	// which is what made this field read 2026 for every block on mainnet.
 	query := `SELECT number, hash, parent_hash, miner, gas_limit, gas_used, base_fee,
-		CAST(timestamp AS INTEGER), tx_count FROM evm_blocks`
+		` + blockEpoch + `, tx_count FROM evm_blocks b`
 	args := []any{}
-	if b := r.URL.Query().Get("before"); b != "" {
-		if n, err := strconv.ParseInt(b, 10, 64); err == nil {
+	if before := r.URL.Query().Get("before"); before != "" {
+		if n, err := strconv.ParseInt(before, 10, 64); err == nil {
 			query += " WHERE number < ?"
 			args = append(args, n)
 		}
@@ -329,7 +363,7 @@ func (s *StatsService) handleBlocks(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *StatsService) handlePagesMain(w http.ResponseWriter, r *http.Request) {
-	db, err := s.conn()
+	db, err := s.conn(r)
 	if err != nil {
 		writeJSON(w, http.StatusOK, map[string]any{})
 		return
@@ -338,9 +372,14 @@ func (s *StatsService) handlePagesMain(w http.ResponseWriter, r *http.Request) {
 	txns := s.count(db, "evm_transactions")
 	addrs := s.count(db, "evm_addresses")
 	avgSec := s.avgBlockTimeSec(db)
-	daily, _ := s.dailySeries(db, `SELECT strftime('%Y-%m-%d', b.timestamp, 'unixepoch') d, COUNT(*)
-		FROM evm_transactions t JOIN evm_blocks b ON t.block_number = b.number
-		WHERE b.timestamp > ? GROUP BY d ORDER BY d`, 30)
+	daily, err := s.dailySeries(db, txsPerDay, 30)
+	if err != nil {
+		// A nil slice marshals to `null`, which the SPA renders as "No data" —
+		// identical on the wire to a chain that genuinely has no transactions.
+		// Log the reason and send an empty series so the two are distinguishable.
+		log.Printf("stats: daily transactions failed: %v", err)
+		daily = []statsPoint{}
+	}
 
 	writeJSON(w, http.StatusOK, map[string]any{
 		"total_blocks":           statsCounter{ID: "total_blocks", Value: fmt.Sprintf("%d", blocks), Title: "Total blocks", Description: "All blocks"},
@@ -352,14 +391,20 @@ func (s *StatsService) handlePagesMain(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *StatsService) handlePagesTransactions(w http.ResponseWriter, r *http.Request) {
-	db, err := s.conn()
+	db, err := s.conn(r)
 	if err != nil {
 		writeJSON(w, http.StatusOK, map[string]any{})
 		return
 	}
+	// Bound on blockEpoch: SQLite orders every INTEGER below every TEXT, so the
+	// datetime string was always "greater than" the epoch bound and this
+	// reported the lifetime transaction count as the last 24 hours.
 	var txns24h int64
-	db.QueryRow(`SELECT COUNT(*) FROM evm_transactions t JOIN evm_blocks b ON t.block_number = b.number
-		WHERE b.timestamp > ?`, time.Now().AddDate(0, 0, -1).Unix()).Scan(&txns24h)
+	if err := db.QueryRow(`SELECT COUNT(*)
+		FROM evm_transactions t JOIN evm_blocks b ON t.block_number = b.number
+		WHERE `+blockEpoch+` > ?`, time.Now().AddDate(0, 0, -1).Unix()).Scan(&txns24h); err != nil {
+		log.Printf("stats: 24h transactions failed: %v", err)
+	}
 	writeJSON(w, http.StatusOK, map[string]any{
 		"transactions_24h": statsCounter{ID: "new_txns_24h", Value: fmt.Sprintf("%d", txns24h), Title: "Transactions (24h)", Description: "Transactions in the last 24 hours"},
 	})

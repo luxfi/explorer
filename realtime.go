@@ -188,30 +188,24 @@ func (h *RealtimeHub) Broadcast(eventType, chain string, data any) {
 	}
 	h.mu.RUnlock()
 
-	// SSE subscribers — wrap in SSE framing once, fan out cheaply.
+	// SSE subscribers — frame the envelope once, fan out cheaply.
 	//
-	// Two shapes, built up-front so fanout() is allocation-free:
-	//   - perChannel: `event: <type>\ndata: <RealtimeMessage JSON>\n\n`
-	//     for the per-channel /blocks /transactions /etc. endpoints.
-	//   - wildcard:   `data: {"event":<type>,"chain":<slug>,"data":<RealtimeMessage.Data JSON>}\n\n`
-	//     for the multiplexed /v1/base/realtime endpoint the SPA opens.
-	//     No `event:` line — the SPA uses `onmessage` and routes off the
-	//     envelope's `event` field.
+	//	data: {"event":<type>,"chain":<slug>,"data":<RealtimeMessage.Data JSON>}\n\n
+	//
+	// No `event:` line: the SPA uses `onmessage` and routes off the envelope's
+	// `event` field. See realtime_sse.go.
 	if h.sse != nil {
-		perChannel := append([]byte("event: "+eventType+"\ndata: "), encoded...)
-		perChannel = append(perChannel, '\n', '\n')
-
 		envBody, err := json.Marshal(struct {
 			Event string `json:"event"`
 			Chain string `json:"chain,omitempty"`
 			Data  any    `json:"data,omitempty"`
 		}{Event: eventType, Chain: chain, Data: data})
-		var wildcard []byte
-		if err == nil {
-			wildcard = append([]byte("data: "), envBody...)
-			wildcard = append(wildcard, '\n', '\n')
+		if err != nil {
+			return
 		}
-		h.sse.fanout(eventType, chain, perChannel, wildcard)
+		envelope := append([]byte("data: "), envBody...)
+		envelope = append(envelope, '\n', '\n')
+		h.sse.fanout(chain, envelope)
 	}
 }
 
