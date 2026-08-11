@@ -42,6 +42,15 @@ type ChainConfig struct {
 	WS          string `json:"ws"           yaml:"ws"`
 	CoinSymbol  string `json:"coin"         yaml:"coin"`
 	PoolManager string `json:"pool_manager" yaml:"pool_manager"` // DEX settlement precompile (0x9999); empty => indexer default
+	// FactoryV2 and FactoryV3 are this chain's canonical AMM factories, and
+	// Native its wrapped native token. Each is an identity of THIS chain, so
+	// each is declared per chain: one process indexes six chains, and a chain
+	// that omitted them used to inherit Lux mainnet's — which served Lux's
+	// pools, priced in Lux's coin, under a neighbouring chain's slug. Omit them
+	// and the chain indexes no AMM, which is the honest answer.
+	FactoryV2 string `json:"factory_v2" yaml:"factory_v2"`
+	FactoryV3 string `json:"factory_v3" yaml:"factory_v3"`
+	Native    string `json:"native"     yaml:"native"`
 	// Enabled gates the chain entirely: a disabled chain is never registered,
 	// so it is not indexed, mounts no routes, and does not reach the SPA's
 	// chain list. See ChainRegistry.Add, the single place it is honoured.
