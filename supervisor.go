@@ -397,6 +397,9 @@ func (s *ChainSupervisor) runSubgraph(ctx context.Context, cfg ChainConfig, sg S
 	idx := graphidx.NewWithConfig(graphidx.Config{
 		RPC:         cfg.RPC,
 		PoolManager: cfg.PoolManager, // empty => indexer defaults to 0x9999
+		FactoryV2:   cfg.FactoryV2,
+		FactoryV3:   cfg.FactoryV3,
+		Native:      cfg.Native,
 		StartBlock:  cfg.Indexer.StartBlock,
 		// Every other line this supervisor emits is prefixed "[slug/name]"; the
 		// graph indexer's were not, so in a six-chain process there was no way to
