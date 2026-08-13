@@ -4,7 +4,7 @@ go 1.26.5
 
 require (
 	github.com/gorilla/websocket v1.5.4-0.20250319132907-e064f32e3674
-	github.com/luxfi/graph v1.2.24
+	github.com/luxfi/graph v1.2.26
 	github.com/luxfi/indexer v1.5.4
 	github.com/luxfi/mdns v0.1.1
 	github.com/mattn/go-sqlite3 v2.0.3+incompatible
