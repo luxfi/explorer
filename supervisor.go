@@ -400,7 +400,11 @@ func (s *ChainSupervisor) runSubgraph(ctx context.Context, cfg ChainConfig, sg S
 		FactoryV2:   cfg.FactoryV2,
 		FactoryV3:   cfg.FactoryV3,
 		Native:      cfg.Native,
-		StartBlock:  cfg.Indexer.StartBlock,
+		// What the token is actually worth: minted at genesis, less what the
+		// treasury still holds and what is bonded to validators.
+		GenesisSupply: cfg.GenesisSupply,
+		Treasury:      cfg.Treasury,
+		StartBlock:    cfg.Indexer.StartBlock,
 		// Every other line this supervisor emits is prefixed "[slug/name]"; the
 		// graph indexer's were not, so in a six-chain process there was no way to
 		// tell which chain a line came from — or which chain had gone quiet.

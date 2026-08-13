@@ -51,6 +51,13 @@ type ChainConfig struct {
 	FactoryV2 string `json:"factory_v2" yaml:"factory_v2"`
 	FactoryV3 string `json:"factory_v3" yaml:"factory_v3"`
 	Native    string `json:"native"     yaml:"native"`
+	// GenesisSupply is every native unit minted at block 0, in whole tokens —
+	// "2000000000000" for Lux and for Zoo. Fixed at genesis and not exposed
+	// over RPC, so it is declared here beside the factory addresses.
+	GenesisSupply string `json:"genesis_supply" yaml:"genesis_supply"`
+	// Treasury holds what has not been distributed yet; its balance is read
+	// live and subtracted from the mint to get circulating supply.
+	Treasury string `json:"treasury" yaml:"treasury"`
 	// Enabled gates the chain entirely: a disabled chain is never registered,
 	// so it is not indexed, mounts no routes, and does not reach the SPA's
 	// chain list. See ChainRegistry.Add, the single place it is honoured.
