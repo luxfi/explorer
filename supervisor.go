@@ -13,7 +13,15 @@ import (
 	"sync"
 	"time"
 
-	_ "github.com/mattn/go-sqlite3"
+	// ONE sqlite C library in this binary, under a name nothing else claims.
+	// This process links graph and indexer as well as its own store, and
+	// csqlite is the house build of the amalgamation all three now open —
+	// registered as "sqlite3". Upstream mattn compiles a second copy of the
+	// same C, and defining every sqlite3_* symbol twice fails at link on
+	// darwin. Not its hanzoai/sqlite wrapper either: that registers
+	// "sqlite", and so does modernc.org/sqlite, which arrives with
+	// hanzoai/replicate — two packages under one name is a panic in init.
+	_ "github.com/hanzoai/csqlite"
 
 	"github.com/luxfi/graph/engine"
 	graphidx "github.com/luxfi/graph/indexer"
@@ -410,17 +418,15 @@ func (s *ChainSupervisor) runSubgraph(ctx context.Context, cfg ChainConfig, sg S
 		// tell which chain a line came from — or which chain had gone quiet.
 		Label: cfg.Slug + "/" + sg.Name,
 	}, store)
-	// One-shot enrichment of Token rows persisted by an older graph build with the
-	// address placeholder (symbol == shortAddr). Opt-in via BACKFILL_TOKENS=1; runs
-	// before Run so live indexing is not racing the same SeedToken writes. Cheap:
-	// ≤3 eth_calls per placeholder token, no re-sync. New tokens are enriched on
-	// first sight regardless of this flag.
-	if os.Getenv("BACKFILL_TOKENS") == "1" {
-		if n, err := idx.BackfillTokens(ctx); err != nil {
-			log.Printf("[%s/%s] token backfill: %v (enriched=%d)", cfg.Slug, sg.Name, err, n)
-		} else {
-			log.Printf("[%s/%s] token backfill: enriched=%d", cfg.Slug, sg.Name, n)
-		}
+	// What a start is for: ask the chain about the Token rows still short an
+	// answer — a symbol an earlier read never got, a supply a build that never
+	// asked for one left empty. Before Run, so live indexing is not racing the
+	// same writes. A row with everything on it costs nothing, which is why this
+	// is simply what a start does rather than something to remember to turn on.
+	if n, err := idx.BackfillTokens(ctx); err != nil {
+		log.Printf("[%s/%s] token backfill: %v (settled=%d)", cfg.Slug, sg.Name, err, n)
+	} else {
+		log.Printf("[%s/%s] token backfill: settled=%d", cfg.Slug, sg.Name, n)
 	}
 	go func() {
 		if err := idx.Run(ctx); err != nil && ctx.Err() == nil {
