@@ -11,7 +11,15 @@ import (
 	"testing"
 	"time"
 
-	_ "github.com/mattn/go-sqlite3"
+	// ONE sqlite C library in this binary, under a name nothing else claims.
+	// This process links graph and indexer as well as its own store, and
+	// csqlite is the house build of the amalgamation all three now open —
+	// registered as "sqlite3". Upstream mattn compiles a second copy of the
+	// same C, and defining every sqlite3_* symbol twice fails at link on
+	// darwin. Not its hanzoai/sqlite wrapper either: that registers
+	// "sqlite", and so does modernc.org/sqlite, which arrives with
+	// hanzoai/replicate — two packages under one name is a panic in init.
+	_ "github.com/hanzoai/csqlite"
 )
 
 // statsChains is the two-chain registry the stats tests resolve hosts against:

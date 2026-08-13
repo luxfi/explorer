@@ -124,6 +124,8 @@ github.com/hablullah/go-hijri v1.0.2 h1:drT/MZpSZJQXo7jftf5fthArShcaMtsal0Zf/dnm
 github.com/hablullah/go-hijri v1.0.2/go.mod h1:OS5qyYLDjORXzK4O1adFw9Q5WfhOcMdAKglDkcTxgWQ=
 github.com/hablullah/go-juliandays v1.0.0 h1:A8YM7wIj16SzlKT0SRJc9CD29iiaUzpBLzh5hr0/5p0=
 github.com/hablullah/go-juliandays v1.0.0/go.mod h1:0JOYq4oFOuDja+oospuc61YoX+uNEn7Z6uHYTbBzdGc=
+github.com/hanzoai/csqlite v0.1.2 h1:4DzdgUfKADhzEP66Y30/HwepuBLrwt7NsemJMfrPGl4=
+github.com/hanzoai/csqlite v0.1.2/go.mod h1:H31a/O6VXuklR9UBkgY++bmAK5uzVfXPqU0F6P9Wsos=
 github.com/hanzoai/ltx v0.5.1 h1:jWamJSHg1RtvcarevSJ/W5lyPJfRB4vBYXDuxyyOup0=
 github.com/hanzoai/ltx v0.5.1/go.mod h1:rWgoDyQiB5d+GOGYncKrQu6uS7Gnoh0xlm1hCU5rq5E=
 github.com/hanzoai/lz4/v4 v4.1.22 h1:NjK1Umwaxb5lnoFB44iGPtGj58y/PLucNcCc2gE8q4I=
@@ -179,12 +181,12 @@ github.com/luxfi/database v1.21.1 h1:GNnoWVa82l+n2dK7x2aG8LR2NEToq6ZCRX0sQjmK0OM
 github.com/luxfi/database v1.21.1/go.mod h1:Gc7Z2OPrrcYLnAL8B1trOnguXauOlSDV5tkviLN6Xec=
 github.com/luxfi/geth v1.20.1 h1:QUGQr4AKvADjwMi7t8a0OfoyxShgEcI9pwie1jFYfm0=
 github.com/luxfi/geth v1.20.1/go.mod h1:GV5bIMEgWviRN+jPXERyVpI16H3iHqPcdIokDoZdrvU=
-github.com/luxfi/graph v1.2.27 h1:0f9Ka2B66xAa5Kvx+1qOlNYgSkCjplhIflhItcU7lng=
-github.com/luxfi/graph v1.2.27/go.mod h1:zyR+rKsUeIWbY5MYP3YEEHR4HoHUm0LWNvjlUSkYlX8=
+github.com/luxfi/graph v1.2.31 h1:JcCTerzKs8CqhXQzn3DDEUOMMsC1R0ud+XrX570v5K8=
+github.com/luxfi/graph v1.2.31/go.mod h1:l5g8jQ7hdwTDG31SmFnMzb8AKn4B8flxFIDvggw+RTY=
 github.com/luxfi/ids v1.3.2 h1:c6Rft5kZB4XqiCtWaGH47bfhaNFm3FGRfhEzI01GVeI=
 github.com/luxfi/ids v1.3.2/go.mod h1:+5l8cYMbKpORJbQ2r98CYJo9TQATgUdnmzpYFZWMwwc=
-github.com/luxfi/indexer v1.5.4 h1:AKsS5KhBZ4BV+1VliMrigfIzl7wDoh1/eCbfCd2/VHo=
-github.com/luxfi/indexer v1.5.4/go.mod h1:j43mbcKk+w9fYwli1wPmvcpu8fNmjbig/+R4kHlV4Zw=
+github.com/luxfi/indexer v1.5.6 h1:gkW4UhvDj5Qak6JTVSUq06uBmPjiWO60Y1K6ytqy27Q=
+github.com/luxfi/indexer v1.5.6/go.mod h1:oypCgtib03LylLJY5TQYct8CAhm16gew6d83PusPFoc=
 github.com/luxfi/log v1.4.3 h1:xkUKRWvQ4ZwvlUC2e0/RTtHYZOYSMvSQ9W9lbjwBmiI=
 github.com/luxfi/log v1.4.3/go.mod h1:myIkufyiQomSQH34K981kbz6cG4WUoerRUh7F4XhlQI=
 github.com/luxfi/math v1.5.1 h1:FDOY75e4vn/Xra1ij99xOS/9XdxQGCPP6HONHRkCwfg=
