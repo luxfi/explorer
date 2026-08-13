@@ -472,8 +472,16 @@ func (s *ChainSupervisor) runSubgraph(ctx context.Context, cfg ChainConfig, sg S
 	mux.HandleFunc("GET "+prefix+"/ql", eng.HandleGraphiQL)
 	mux.HandleFunc("GET "+prefix+"/health", statusHandler)
 
+	// The swap form asks two questions the GraphQL schema does not answer in a
+	// shape a form can use: what can I trade, and what do I get. Both read the
+	// same store this subgraph already indexes, so they belong beside it rather
+	// than behind a second service with a second copy of the book.
+	quoter := engine.NewQuoter(store, cfg.ChainID, cfg.RPC, cfg.QuoterV2, cfg.Native)
+	mux.HandleFunc("POST "+prefix+"/quote", engine.HandleQuote(quoter))
+	mux.HandleFunc("GET "+prefix+"/swappable_tokens", engine.HandleSwappableTokens(store, cfg.ChainID))
+
 	s.graphRoutes.Store(cfg.Slug+"/"+sg.Name, http.Handler(mux))
-	log.Printf("[%s/%s] graph mounted at %s/{graphql,ql,health} (schema=%s)",
+	log.Printf("[%s/%s] graph mounted at %s/{graphql,ql,health,quote,swappable_tokens} (schema=%s)",
 		cfg.Slug, sg.Name, prefix, schema)
 
 	<-ctx.Done()

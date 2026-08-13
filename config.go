@@ -51,6 +51,13 @@ type ChainConfig struct {
 	FactoryV2 string `json:"factory_v2" yaml:"factory_v2"`
 	FactoryV3 string `json:"factory_v3" yaml:"factory_v3"`
 	Native    string `json:"native"     yaml:"native"`
+	// QuoterV2 is this chain's V3 periphery quoter. A quote off the indexed
+	// book is exact for V2 (constant product, closed form) and only an estimate
+	// for V3, where the answer depends on which ticks the trade crosses. With
+	// this set, a V3 route is priced by the chain itself; without it, the
+	// quote falls back to the closed form and says so. Per chain, like the
+	// factories, because it is deployed per chain.
+	QuoterV2 string `json:"quoter_v2" yaml:"quoter_v2"`
 	// GenesisSupply is every native unit minted at block 0, in whole tokens —
 	// "2000000000000" for Lux and for Zoo. Fixed at genesis and not exposed
 	// over RPC, so it is declared here beside the factory addresses.
