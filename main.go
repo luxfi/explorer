@@ -165,6 +165,7 @@ func main() {
 	mux.HandleFunc("HEAD /v1/base/realtime", realtime)
 
 	supervisor.MountRoutes(mux)
+	supervisor.MountSwap(mux)
 	frontend.Mount(mux)
 
 	log.Printf("[explorer] %s listening %s data=%s chains=%d mdns=%v %s",
