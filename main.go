@@ -140,7 +140,12 @@ func main() {
 	// NEXT_PUBLIC_STATS_API_HOST is set and shows error banners without them;
 	// each answer is read from the live indexer SQLite DB of the chain the
 	// request host is served.
-	NewStatsService(cfg.DataDir, cfg).Mount(mux)
+	// Warm ahead of the first caller: these answers are whole-table aggregates,
+	// so computing one on arrival is the difference between a page that paints
+	// and a page still waiting for its numbers.
+	stats := NewStatsService(cfg.DataDir, cfg)
+	stats.Mount(mux)
+	go stats.Warm()
 
 	mux.HandleFunc("GET /v1/explorer/admin/chains", registry.HandleList)
 	mux.HandleFunc("POST /v1/explorer/admin/chains", registry.HandleAdd)

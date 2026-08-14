@@ -9,6 +9,7 @@ import (
 	"path/filepath"
 	"strconv"
 	"sync"
+	"sync/atomic"
 	"time"
 )
 
@@ -28,19 +29,26 @@ type StatsService struct {
 	cfg     Config
 	mu      sync.Mutex
 	dbs     map[string]*sql.DB
+	aggs    map[string]*memo
 }
 
 // NewStatsService reads each chain's indexer DB at {dataDir}/{slug}/query/indexer.db.
 func NewStatsService(dataDir string, cfg Config) *StatsService {
-	return &StatsService{dataDir: dataDir, cfg: cfg, dbs: make(map[string]*sql.DB)}
+	return &StatsService{
+		dataDir: dataDir, cfg: cfg,
+		dbs:  make(map[string]*sql.DB),
+		aggs: make(map[string]*memo),
+	}
 }
 
-// conn lazily opens a read-only handle to the DB of the chain the request host
-// is served, one handle per chain. The indexer writes in WAL mode, so a
-// read-only reader never blocks ingestion. The DB may not exist until the
-// indexer has created it, so open is retried per-request until it succeeds.
-func (s *StatsService) conn(r *http.Request) (*sql.DB, error) {
-	slug := s.cfg.Serves(r.Host).Slug
+// chain names the chain a request is served from.
+func (s *StatsService) chain(r *http.Request) string { return s.cfg.Serves(r.Host).Slug }
+
+// conn lazily opens a read-only handle to a chain's DB, one handle per chain.
+// The indexer writes in WAL mode, so a read-only reader never blocks ingestion.
+// The DB may not exist until the indexer has created it, so open is retried
+// per-request until it succeeds.
+func (s *StatsService) conn(slug string) (*sql.DB, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if db, ok := s.dbs[slug]; ok {
@@ -58,6 +66,144 @@ func (s *StatsService) conn(r *http.Request) (*sql.DB, error) {
 	}
 	s.dbs[slug] = db
 	return db, nil
+}
+
+// ---- One chain's arithmetic, computed once ----
+
+// aggregate is every whole-table number the stats surfaces report. Each field
+// costs a full scan: SQLite keeps no row count, and both the day bucket and the
+// epoch bound are expressions over a TEXT datetime column, so no index answers
+// them. On a chain of a million blocks the whole set costs seconds, and the
+// same handful of connections serves every reader, so a request that computes
+// its own copy makes every other request wait for it.
+//
+// A chain is append-only: within a few seconds every caller wants the same
+// numbers. So they are computed once per chain per interval and read from
+// memory, and the cost stops scaling with traffic. An indexed lookup like
+// /v1/blocks is three orders of magnitude cheaper and is left alone.
+type aggregate struct {
+	blocks, txns, addrs, head, txns24h int64
+	avgSec                             float64
+	blocksPerDay, txsPerDay            []statsPoint // trailing year, oldest first
+	at                                 time.Time
+}
+
+// memo holds one chain's aggregate and admits a single computation at a time.
+type memo struct {
+	compute sync.Mutex
+	val     atomic.Pointer[aggregate]
+}
+
+// freshFor is how long an aggregate is served before a refresh is started. The
+// numbers it holds are lifetime totals over an append-only chain, so a caller
+// reading one a few seconds old sees the same chain everyone else does.
+const freshFor = 30 * time.Second
+
+// memoFor returns the memo for a chain, creating it on first use.
+func (s *StatsService) memoFor(slug string) *memo {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	m, ok := s.aggs[slug]
+	if !ok {
+		m = &memo{}
+		s.aggs[slug] = m
+	}
+	return m
+}
+
+// numbers returns a chain's aggregate, and whether there is one to report.
+//
+// Once a value exists it is returned immediately and refreshed in the
+// background when it ages past freshFor, so no request ever waits on a scan.
+// Before then — a fresh chain, or an indexer that has not written its DB yet —
+// the first caller computes it and any caller arriving meanwhile waits for that
+// same computation rather than starting a second one.
+func (s *StatsService) numbers(slug string) (*aggregate, bool) {
+	m := s.memoFor(slug)
+	if v := m.val.Load(); v != nil {
+		if time.Since(v.at) > freshFor && m.compute.TryLock() {
+			go func() {
+				defer m.compute.Unlock()
+				if fresh := s.scan(slug); fresh != nil {
+					m.val.Store(fresh)
+				}
+			}()
+		}
+		return v, true
+	}
+	m.compute.Lock()
+	defer m.compute.Unlock()
+	if v := m.val.Load(); v != nil {
+		return v, true
+	}
+	v := s.scan(slug)
+	if v == nil {
+		return nil, false
+	}
+	m.val.Store(v)
+	return v, true
+}
+
+// scan computes a chain's aggregate. It is the only place these tables are
+// counted, so every stats surface reports the same numbers as every other.
+func (s *StatsService) scan(slug string) *aggregate {
+	db, err := s.conn(slug)
+	if err != nil {
+		return nil
+	}
+	a := &aggregate{at: time.Now()}
+	a.blocks = s.count(db, "evm_blocks")
+	a.txns = s.count(db, "evm_transactions")
+	a.addrs = s.count(db, "evm_addresses")
+	a.avgSec = s.avgBlockTimeSec(db)
+	if err := db.QueryRow("SELECT COALESCE(MAX(number),0) FROM evm_blocks").Scan(&a.head); err != nil {
+		log.Printf("stats[%s]: head block unavailable: %v", slug, err)
+	}
+	// Bound on blockEpoch: SQLite orders every INTEGER below every TEXT, so a
+	// datetime string compared against an epoch bound is always "greater than"
+	// it, which reports the lifetime transaction count as the last 24 hours.
+	if err := db.QueryRow(`SELECT COUNT(*)
+		FROM evm_transactions t JOIN evm_blocks b ON t.block_number = b.number
+		WHERE `+blockEpoch+` > ?`, time.Now().AddDate(0, 0, -1).Unix()).Scan(&a.txns24h); err != nil {
+		log.Printf("stats[%s]: 24h transactions failed: %v", slug, err)
+	}
+	// A year covers every window asked for, so the shorter ones are cut from it
+	// rather than scanned again.
+	var err2 error
+	if a.blocksPerDay, err2 = s.dailySeries(db, blocksPerDay, 365); err2 != nil {
+		log.Printf("stats[%s]: daily blocks failed: %v", slug, err2)
+		a.blocksPerDay = []statsPoint{}
+	}
+	if a.txsPerDay, err2 = s.dailySeries(db, txsPerDay, 365); err2 != nil {
+		log.Printf("stats[%s]: daily transactions failed: %v", slug, err2)
+		a.txsPerDay = []statsPoint{}
+	}
+	return a
+}
+
+// trailing cuts the last `days` UTC days from a series. Dates are ISO, so they
+// compare chronologically as strings. A day on which nothing happened has no
+// row, which is why this selects by date rather than by count.
+func trailing(points []statsPoint, days int) []statsPoint {
+	cut := time.Now().AddDate(0, 0, -days).Format("2006-01-02")
+	out := make([]statsPoint, 0, days)
+	for _, p := range points {
+		if p.Date >= cut {
+			out = append(out, p)
+		}
+	}
+	return out
+}
+
+// Warm computes every configured chain's aggregate so the first caller after a
+// start reads it from memory instead of waiting for the scan.
+func (s *StatsService) Warm() {
+	for _, ch := range s.cfg.Chains {
+		if ch.Slug == "" {
+			continue
+		}
+		go s.numbers(ch.Slug)
+	}
 }
 
 // Mount registers the stats-service routes on mux.
@@ -212,15 +358,12 @@ const (
 // ---- Handlers ----
 
 func (s *StatsService) handleCounters(w http.ResponseWriter, r *http.Request) {
-	db, err := s.conn(r)
-	if err != nil {
+	a, ok := s.numbers(s.chain(r))
+	if !ok {
 		writeJSON(w, http.StatusOK, map[string]any{"counters": []statsCounter{}})
 		return
 	}
-	blocks := s.count(db, "evm_blocks")
-	txns := s.count(db, "evm_transactions")
-	addrs := s.count(db, "evm_addresses")
-	avgSec := s.avgBlockTimeSec(db)
+	blocks, txns, addrs, avgSec := a.blocks, a.txns, a.addrs, a.avgSec
 
 	counters := []statsCounter{
 		{ID: "total_blocks", Value: fmt.Sprintf("%d", blocks), Title: "Total blocks", Description: "All blocks indexed on the chain"},
@@ -266,21 +409,14 @@ func (s *StatsService) handleLine(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusNotFound, map[string]any{"error": "unknown chart"})
 		return
 	}
-	db, err := s.conn(r)
-	if err != nil {
+	a, ok := s.numbers(s.chain(r))
+	if !ok {
 		writeJSON(w, http.StatusOK, statsLineChart{Chart: []statsPoint{}, Info: info})
 		return
 	}
-
-	query := blocksPerDay
+	points := a.blocksPerDay
 	if id == "newTxnsPerDay" {
-		query = txsPerDay
-	}
-	points, err := s.dailySeries(db, query, 365)
-	if err != nil {
-		log.Printf("stats: chart %s failed: %v", id, err)
-		writeJSON(w, http.StatusOK, statsLineChart{Chart: []statsPoint{}, Info: info})
-		return
+		points = a.txsPerDay
 	}
 	writeJSON(w, http.StatusOK, statsLineChart{Chart: points, Info: info})
 }
@@ -291,8 +427,8 @@ func (s *StatsService) handleLine(w http.ResponseWriter, r *http.Request) {
 // That comparison is the only honest way to tell whether the index is current —
 // an HTTP 200 from the explorer proves nothing about whether it has the chain.
 func (s *StatsService) handleStats(w http.ResponseWriter, r *http.Request) {
-	db, err := s.conn(r)
-	if err != nil {
+	a, ok := s.numbers(s.chain(r))
+	if !ok {
 		// No DB yet is a real state (fresh chain, indexer still starting), not
 		// an error. Report zeroes and say so, rather than 500ing a health check.
 		writeJSON(w, http.StatusOK, map[string]any{
@@ -301,14 +437,12 @@ func (s *StatsService) handleStats(w http.ResponseWriter, r *http.Request) {
 		})
 		return
 	}
-	var head int64
-	_ = db.QueryRow("SELECT COALESCE(MAX(number),0) FROM evm_blocks").Scan(&head)
 	writeJSON(w, http.StatusOK, map[string]any{
-		"total_blocks":       s.count(db, "evm_blocks"),
-		"total_transactions": s.count(db, "evm_transactions"),
-		"total_addresses":    s.count(db, "evm_addresses"),
-		"average_block_time": s.avgBlockTimeSec(db),
-		"head_block":         head,
+		"total_blocks":       a.blocks,
+		"total_transactions": a.txns,
+		"total_addresses":    a.addrs,
+		"average_block_time": a.avgSec,
+		"head_block":         a.head,
 		"indexed":            true,
 	})
 }
@@ -326,7 +460,7 @@ func (s *StatsService) handleBlocks(w http.ResponseWriter, r *http.Request) {
 	if limit > 200 {
 		limit = 200 // bound the page; an unbounded LIMIT is a DoS on a big index
 	}
-	db, err := s.conn(r)
+	db, err := s.conn(s.chain(r))
 	if err != nil {
 		writeJSON(w, http.StatusOK, map[string]any{"blocks": []any{}, "indexed": false})
 		return
@@ -379,50 +513,33 @@ func (s *StatsService) handleBlocks(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *StatsService) handlePagesMain(w http.ResponseWriter, r *http.Request) {
-	db, err := s.conn(r)
-	if err != nil {
+	a, ok := s.numbers(s.chain(r))
+	if !ok {
 		writeJSON(w, http.StatusOK, map[string]any{})
 		return
 	}
-	blocks := s.count(db, "evm_blocks")
-	txns := s.count(db, "evm_transactions")
-	addrs := s.count(db, "evm_addresses")
-	avgSec := s.avgBlockTimeSec(db)
-	daily, err := s.dailySeries(db, txsPerDay, 30)
-	if err != nil {
-		// A nil slice marshals to `null`, which the SPA renders as "No data" —
-		// identical on the wire to a chain that genuinely has no transactions.
-		// Log the reason and send an empty series so the two are distinguishable.
-		log.Printf("stats: daily transactions failed: %v", err)
-		daily = []statsPoint{}
-	}
+	// A nil slice marshals to `null`, which the SPA renders as "No data" —
+	// identical on the wire to a chain that genuinely has no transactions.
+	// trailing always returns a slice, so the two stay distinguishable.
+	daily := trailing(a.txsPerDay, 30)
 
 	writeJSON(w, http.StatusOK, map[string]any{
-		"total_blocks":           statsCounter{ID: "total_blocks", Value: fmt.Sprintf("%d", blocks), Title: "Total blocks", Description: "All blocks"},
-		"total_transactions":     statsCounter{ID: "total_txns", Value: fmt.Sprintf("%d", txns), Title: "Total transactions", Description: "All transactions"},
-		"total_addresses":        statsCounter{ID: "total_addresses", Value: fmt.Sprintf("%d", addrs), Title: "Total addresses", Description: "Distinct addresses"},
-		"average_block_time":     statsCounter{ID: "average_block_time", Value: fmt.Sprintf("%.1f", avgSec), Title: "Average block time", Units: "s", Description: "Average interval between blocks"},
+		"total_blocks":           statsCounter{ID: "total_blocks", Value: fmt.Sprintf("%d", a.blocks), Title: "Total blocks", Description: "All blocks"},
+		"total_transactions":     statsCounter{ID: "total_txns", Value: fmt.Sprintf("%d", a.txns), Title: "Total transactions", Description: "All transactions"},
+		"total_addresses":        statsCounter{ID: "total_addresses", Value: fmt.Sprintf("%d", a.addrs), Title: "Total addresses", Description: "Distinct addresses"},
+		"average_block_time":     statsCounter{ID: "average_block_time", Value: fmt.Sprintf("%.1f", a.avgSec), Title: "Average block time", Units: "s", Description: "Average interval between blocks"},
 		"daily_new_transactions": statsLineChart{Chart: daily, Info: lineInfos["newTxnsPerDay"]},
 	})
 }
 
 func (s *StatsService) handlePagesTransactions(w http.ResponseWriter, r *http.Request) {
-	db, err := s.conn(r)
-	if err != nil {
+	a, ok := s.numbers(s.chain(r))
+	if !ok {
 		writeJSON(w, http.StatusOK, map[string]any{})
 		return
 	}
-	// Bound on blockEpoch: SQLite orders every INTEGER below every TEXT, so the
-	// datetime string was always "greater than" the epoch bound and this
-	// reported the lifetime transaction count as the last 24 hours.
-	var txns24h int64
-	if err := db.QueryRow(`SELECT COUNT(*)
-		FROM evm_transactions t JOIN evm_blocks b ON t.block_number = b.number
-		WHERE `+blockEpoch+` > ?`, time.Now().AddDate(0, 0, -1).Unix()).Scan(&txns24h); err != nil {
-		log.Printf("stats: 24h transactions failed: %v", err)
-	}
 	writeJSON(w, http.StatusOK, map[string]any{
-		"transactions_24h": statsCounter{ID: "new_txns_24h", Value: fmt.Sprintf("%d", txns24h), Title: "Transactions (24h)", Description: "Transactions in the last 24 hours"},
+		"transactions_24h": statsCounter{ID: "new_txns_24h", Value: fmt.Sprintf("%d", a.txns24h), Title: "Transactions (24h)", Description: "Transactions in the last 24 hours"},
 	})
 }
 
