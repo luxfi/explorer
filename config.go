@@ -58,6 +58,10 @@ type ChainConfig struct {
 	// quote falls back to the closed form and says so. Per chain, like the
 	// factories, because it is deployed per chain.
 	QuoterV2 string `json:"quoter_v2" yaml:"quoter_v2"`
+	// Router is this chain's V3 periphery SwapRouter02 — the contract a swap
+	// is addressed to, and the contract an approval grants. One field, because
+	// the two must name the same address or the grant is spent on nothing.
+	Router string `json:"router" yaml:"router"`
 	// GenesisSupply is every native unit minted at block 0, in whole tokens —
 	// "2000000000000" for Lux and for Zoo. Fixed at genesis and not exposed
 	// over RPC, so it is declared here beside the factory addresses.

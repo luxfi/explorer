@@ -46,7 +46,12 @@ type ChainSupervisor struct {
 
 	indexerRoutes sync.Map // map[slug]http.Handler
 	graphRoutes   sync.Map // map[slug + "/" + subgraph]http.Handler
+	swapRoutes    sync.Map // map[chainID]*swapMount — the swap form's routes, by the chain they name
 	defaultSlug   string   // serves /v1/indexer/* when the host names no chain
+	// defaultChainID answers a swap request that names no chain. A form that
+	// has not finished loading its network sends one, and the alternative to a
+	// default is an error on the first render.
+	defaultChainID int64
 
 	// realtimeHub is the explorer's RealtimeHub. When set (via
 	// AttachRealtime), the supervisor wires each per-chain EVM indexer's
@@ -472,16 +477,42 @@ func (s *ChainSupervisor) runSubgraph(ctx context.Context, cfg ChainConfig, sg S
 	mux.HandleFunc("GET "+prefix+"/ql", eng.HandleGraphiQL)
 	mux.HandleFunc("GET "+prefix+"/health", statusHandler)
 
-	// The swap form asks two questions the GraphQL schema does not answer in a
-	// shape a form can use: what can I trade, and what do I get. Both read the
-	// same store this subgraph already indexes, so they belong beside it rather
-	// than behind a second service with a second copy of the book.
+	// The swap form asks four questions the GraphQL schema does not answer in a
+	// shape a form can use: what can I trade, what do I get, may the router
+	// spend it, and what do I sign. All four read the same store this subgraph
+	// already indexes, so they belong beside it rather than behind a second
+	// service with a second copy of the book.
 	quoter := engine.NewQuoter(store, cfg.ChainID, cfg.RPC, cfg.QuoterV2, cfg.Native)
 	mux.HandleFunc("POST "+prefix+"/quote", engine.HandleQuote(quoter))
 	mux.HandleFunc("GET "+prefix+"/swappable_tokens", engine.HandleSwappableTokens(store, cfg.ChainID))
+	// A swap is a transaction addressed to this chain's router, and an approval
+	// grants that same router the right to spend. Without one configured there
+	// is no address to name, and a call built anyway would be signed against
+	// nothing — so the routes are simply absent, which a caller can see.
+	if cfg.Router != "" {
+		mux.HandleFunc("POST "+prefix+"/swap", engine.HandleSwap(cfg.ChainID, cfg.Router, cfg.Native))
+		mux.HandleFunc("POST "+prefix+"/check_approval", engine.HandleCheckApproval(cfg.ChainID, cfg.RPC, cfg.Router))
+	} else {
+		log.Printf("[%s/%s] no router configured — /swap and /check_approval not served", cfg.Slug, sg.Name)
+	}
 
 	s.graphRoutes.Store(cfg.Slug+"/"+sg.Name, http.Handler(mux))
-	log.Printf("[%s/%s] graph mounted at %s/{graphql,ql,health,quote,swappable_tokens} (schema=%s)",
+
+	// The same mux answers the unprefixed /v1/{quote,swap,…} routes for this
+	// chain. A swap request already carries the chain it is for, so naming it
+	// again in the path is a second place for the two to disagree. Registering
+	// the handler VALUES here rather than building a second set is what keeps
+	// the prefixed and unprefixed routes one implementation.
+	if cfg.ChainID != 0 && servesAMM(schema) {
+		s.swapRoutes.Store(cfg.ChainID, &swapMount{prefix: prefix, h: mux})
+		if cfg.Default {
+			s.mu.Lock()
+			s.defaultChainID = cfg.ChainID
+			s.mu.Unlock()
+		}
+	}
+
+	log.Printf("[%s/%s] graph mounted at %s/{graphql,ql,health,quote,swappable_tokens,swap,check_approval} (schema=%s)",
 		cfg.Slug, sg.Name, prefix, schema)
 
 	<-ctx.Done()
