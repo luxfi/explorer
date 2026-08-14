@@ -484,7 +484,7 @@ func (s *ChainSupervisor) runSubgraph(ctx context.Context, cfg ChainConfig, sg S
 	// service with a second copy of the book.
 	quoter := engine.NewQuoter(store, cfg.ChainID, cfg.RPC, cfg.QuoterV2, cfg.Native)
 	mux.HandleFunc("POST "+prefix+"/quote", engine.HandleQuote(quoter))
-	mux.HandleFunc("GET "+prefix+"/swappable_tokens", engine.HandleSwappableTokens(store, cfg.ChainID))
+	mux.HandleFunc("GET "+prefix+"/swappable_tokens", engine.HandleSwappableTokens(store, cfg.ChainID, cfg.CoinSymbol, cfg.Native))
 	// A swap is a transaction addressed to this chain's router, and an approval
 	// grants that same router the right to spend. Both are rendered into a
 	// twenty-byte argument, as is the wrapped native a route substitutes for
