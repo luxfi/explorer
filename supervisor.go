@@ -486,14 +486,17 @@ func (s *ChainSupervisor) runSubgraph(ctx context.Context, cfg ChainConfig, sg S
 	mux.HandleFunc("POST "+prefix+"/quote", engine.HandleQuote(quoter))
 	mux.HandleFunc("GET "+prefix+"/swappable_tokens", engine.HandleSwappableTokens(store, cfg.ChainID))
 	// A swap is a transaction addressed to this chain's router, and an approval
-	// grants that same router the right to spend. Without one configured there
-	// is no address to name, and a call built anyway would be signed against
-	// nothing — so the routes are simply absent, which a caller can see.
-	if cfg.Router != "" {
+	// grants that same router the right to spend. Both are rendered into a
+	// twenty-byte argument, as is the wrapped native a route substitutes for
+	// the coin, so anything else here produces a call whose arguments have slid
+	// — signed against an address nobody configured. Without both the routes
+	// are simply absent, which a caller can see.
+	if canSwap(cfg) {
 		mux.HandleFunc("POST "+prefix+"/swap", engine.HandleSwap(cfg.ChainID, cfg.Router, cfg.Native))
 		mux.HandleFunc("POST "+prefix+"/check_approval", engine.HandleCheckApproval(cfg.ChainID, cfg.RPC, cfg.Router))
 	} else {
-		log.Printf("[%s/%s] no router configured — /swap and /check_approval not served", cfg.Slug, sg.Name)
+		log.Printf("[%s/%s] router=%q native=%q — both must be addresses; /swap and /check_approval not served",
+			cfg.Slug, sg.Name, cfg.Router, cfg.Native)
 	}
 
 	s.graphRoutes.Store(cfg.Slug+"/"+sg.Name, http.Handler(mux))
@@ -503,7 +506,12 @@ func (s *ChainSupervisor) runSubgraph(ctx context.Context, cfg ChainConfig, sg S
 	// again in the path is a second place for the two to disagree. Registering
 	// the handler VALUES here rather than building a second set is what keeps
 	// the prefixed and unprefixed routes one implementation.
-	if cfg.ChainID != 0 && servesAMM(schema) {
+	//
+	// A chain may declare more than one subgraph holding a book, and each runs
+	// in its own goroutine, so "whichever registered last" would pick a
+	// different book across restarts. The one named in the config first wins,
+	// decided from the config rather than from the scheduler.
+	if canSwap(cfg) && sg.Name == firstAMM(cfg) {
 		s.swapRoutes.Store(cfg.ChainID, &swapMount{prefix: prefix, h: mux})
 		if cfg.Default {
 			s.mu.Lock()
