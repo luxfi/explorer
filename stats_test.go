@@ -8,6 +8,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"sync"
 	"testing"
 	"time"
 
@@ -330,5 +331,88 @@ func TestAverageBlockTimeSurvivesAStrayRow(t *testing.T) {
 				t.Errorf("average_block_time = %v, want the real ~48-60s cadence", got)
 			}
 		})
+	}
+}
+
+// addBlock appends one block and one transaction to a chain's indexer DB,
+// bypassing the service so nothing invalidates what it already holds.
+func addBlock(t *testing.T, s *StatsService, slug string, number int) {
+	t.Helper()
+	db, err := sql.Open("sqlite3", filepath.Join(s.dataDir, slug, "query", "indexer.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	ts := time.Now()
+	if _, err := db.Exec(`INSERT INTO evm_blocks
+		(id,number,hash,parent_hash,miner,gas_limit,gas_used,timestamp,tx_count,base_fee)
+		VALUES(?,?,?,?,?,?,?,?,?,?)`,
+		fmt.Sprintf("0x%064d", number), number, fmt.Sprintf("0x%064d", number),
+		fmt.Sprintf("0x%064d", number-1), "0x0000000000000000000000000000000000000001",
+		12000000, 21000, ts, 1, "0x5"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.Exec(`INSERT INTO evm_transactions(hash,block_number,timestamp) VALUES(?,?,?)`,
+		fmt.Sprintf("0xaa%062d", number), number, ts); err != nil {
+		t.Fatal(err)
+	}
+}
+
+// Every number these surfaces report costs a full scan of the table, so they
+// are counted once per chain and read from memory until they age out. This
+// pins that: a block written straight into the DB is NOT reflected while the
+// held value is still fresh, and IS once it has aged.
+func TestStatsCountOncePerChainNotPerRequest(t *testing.T) {
+	s := newStats(t, 5)
+
+	if got := get(t, s.handleStats, "explore.lux.network", "/v1/stats")["total_blocks"]; got != 5.0 {
+		t.Fatalf("total_blocks = %v, want 5", got)
+	}
+	addBlock(t, s, "cchain", 6)
+
+	// Still five: the second caller reads the value the first one computed
+	// rather than scanning the table again.
+	if got := get(t, s.handleStats, "explore.lux.network", "/v1/stats")["total_blocks"]; got != 5.0 {
+		t.Fatalf("rescanned per request: total_blocks = %v, want the held 5", got)
+	}
+
+	// Age it out, and the next caller is served the previous value while one
+	// refresh runs behind it — so no request ever waits on the scan.
+	m := s.memoFor("cchain")
+	old := m.val.Load()
+	aged := *old
+	aged.at = time.Now().Add(-2 * freshFor)
+	m.val.Store(&aged)
+
+	deadline := time.Now().Add(5 * time.Second)
+	for time.Now().Before(deadline) {
+		if get(t, s.handleStats, "explore.lux.network", "/v1/stats")["total_blocks"] == 6.0 {
+			return
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+	t.Fatal("stale value was never refreshed: total_blocks stuck at 5 after aging out")
+}
+
+// Concurrent callers share one computation instead of each starting their own,
+// which is what keeps a burst of homepages off the chain's connections.
+func TestStatsServeConcurrentCallersOneAnswer(t *testing.T) {
+	s := newStats(t, 20)
+
+	const callers = 32
+	var wg sync.WaitGroup
+	got := make([]any, callers)
+	for i := range callers {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			got[i] = get(t, s.handlePagesMain, "explore.lux.network", "/v1/pages/main")["total_blocks"].(map[string]any)["value"]
+		}()
+	}
+	wg.Wait()
+	for i, v := range got {
+		if v != "20" {
+			t.Fatalf("caller %d saw total_blocks %v, want 20", i, v)
+		}
 	}
 }
