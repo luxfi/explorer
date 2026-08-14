@@ -197,12 +197,23 @@ func trailing(points []statsPoint, days int) []statsPoint {
 
 // Warm computes every configured chain's aggregate so the first caller after a
 // start reads it from memory instead of waiting for the scan.
+// One chain at a time, and the default one first. Every chain this process
+// serves would otherwise scan its whole index at the same moment, and they
+// share one disk: run together they all finish late, and a caller that arrives
+// meanwhile waits behind its own chain's share of the contention. Run in turn,
+// each finishes as fast as the disk allows, and the chain the front page asks
+// about is ready first.
 func (s *StatsService) Warm() {
 	for _, ch := range s.cfg.Chains {
-		if ch.Slug == "" {
-			continue
+		if ch.Default && ch.Slug != "" {
+			s.numbers(ch.Slug)
+			break
 		}
-		go s.numbers(ch.Slug)
+	}
+	for _, ch := range s.cfg.Chains {
+		if ch.Slug != "" && !ch.Default {
+			s.numbers(ch.Slug)
+		}
 	}
 }
 
