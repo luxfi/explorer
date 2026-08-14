@@ -197,7 +197,24 @@ func withSecurity(next http.Handler) http.Handler {
 		w.Header().Set("Referrer-Policy", "strict-origin-when-cross-origin")
 		w.Header().Set("Access-Control-Allow-Origin", "*")
 		w.Header().Set("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS")
-		w.Header().Set("Access-Control-Allow-Headers", "Content-Type, Authorization")
+		// Answer the preflight with the headers it actually asked about.
+		//
+		// A fixed list only permits what someone thought to list, and a browser
+		// refuses the whole request over one name missing from it: the exchange
+		// sends x-api-key, which was not here, so every call to /v1/quote and
+		// /v1/swappable_tokens failed the preflight and the swap panel had
+		// neither a token list nor a price.
+		//
+		// A literal "*" is not the fix — Safari does not honour the wildcard in
+		// this header and refuses exactly the same way. Echoing the request's
+		// own Access-Control-Request-Headers is precise, needs no maintenance,
+		// and is understood everywhere.
+		if asked := r.Header.Get("Access-Control-Request-Headers"); asked != "" {
+			w.Header().Set("Access-Control-Allow-Headers", asked)
+		} else {
+			w.Header().Set("Access-Control-Allow-Headers", "Content-Type, Authorization")
+		}
+		w.Header().Set("Vary", "Origin, Access-Control-Request-Headers")
 		if r.Method == http.MethodOptions {
 			w.WriteHeader(http.StatusNoContent)
 			return
