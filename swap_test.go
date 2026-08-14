@@ -224,3 +224,125 @@ func TestServesAMM(t *testing.T) {
 		}
 	}
 }
+
+// A quote states the chain it was priced on. A sibling key beside it, or a
+// query parameter, must not send that quote to another chain's router.
+func TestSwapQuoteChainBeatsEverythingBesideIt(t *testing.T) {
+	mux := swapServer(t, luxChain)
+	for _, c := range []struct{ name, path, body string }{
+		{"query says otherwise", "/v1/quote?chainId=200200",
+			`{"quote":{"chainId":96369}}`},
+		{"sibling key says otherwise", "/v1/quote",
+			`{"chainId":200200,"quote":{"chainId":96369}}`},
+		{"token chain says otherwise", "/v1/quote",
+			`{"tokenInChainId":200200,"quote":{"chainId":96369}}`},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			code, out := call(t, mux, http.MethodPost, c.path, c.body)
+			if code != http.StatusOK {
+				t.Fatalf("status = %d: %v", code, out)
+			}
+			if out["servedBy"] != float64(luxChain) {
+				t.Errorf("served by %v, want %d — the quote's own chain must win", out["servedBy"], luxChain)
+			}
+		})
+	}
+}
+
+// A Lux quote cannot become a Zoo transaction. It is stopped twice: here,
+// because the dispatcher routes on the quote's own chain and this process does
+// not index it; and again in the handler, which refuses a quote priced
+// elsewhere even when something hands it one (engine.TestSwapRefusesAQuoteFrom-
+// AnotherChain). Either alone would do; the point is that the query parameter
+// asking for Zoo does not get a say.
+func TestSwapHandlerRefusesAForeignQuoteEndToEnd(t *testing.T) {
+	s := NewChainSupervisor(Config{DataDir: t.TempDir()})
+	prefix := "/v1/graph/zoo/amm"
+	m := http.NewServeMux()
+	m.HandleFunc("POST "+prefix+"/swap", engine.HandleSwap(zooChain, router, wlux))
+	s.swapRoutes.Store(int64(zooChain), &swapMount{prefix: prefix, h: m})
+	s.defaultChainID = zooChain
+	mux := http.NewServeMux()
+	s.MountSwap(mux)
+
+	code, out := call(t, mux, http.MethodPost, "/v1/swap?chainId=200200", `{"quote":{
+		"chainId":96369,"swapper":"`+trader+`",
+		"input":{"token":"`+lusd+`","amount":"1000"},"output":{"token":"`+lusd+`","amount":"1000"},
+		"tradeType":"EXACT_INPUT","slippage":0.5,
+		"route":[[{"type":"v3-pool","address":"0x0000000000000000000000000000000000000001",
+			"tokenIn":{"address":"`+lusd+`","chainId":96369,"symbol":"A","decimals":"18"},
+			"tokenOut":{"address":"`+wlux+`","chainId":96369,"symbol":"B","decimals":"18"},
+			"fee":"3000","amountIn":"1000","amountOut":"1000"}]]}}`)
+	if code != http.StatusNotFound || out["errorCode"] != "UNKNOWN_CHAIN" {
+		t.Fatalf("status = %d (%v), want 404 UNKNOWN_CHAIN — the quote names a chain this process does not index", code, out)
+	}
+}
+
+// A body larger than the handlers will read is refused as oversized, not
+// reported as malformed JSON.
+func TestSwapRefusesAnOversizeBodyAsOversize(t *testing.T) {
+	mux := swapServer(t, luxChain)
+	code, out := call(t, mux, http.MethodPost, "/v1/quote",
+		`{"pad":"`+strings.Repeat("x", 2<<20)+`"}`)
+	if code != http.StatusRequestEntityTooLarge {
+		t.Errorf("status = %d, want 413", code)
+	}
+	if d, _ := out["detail"].(string); !strings.Contains(d, "under") {
+		t.Errorf("detail = %q, want it to name the size limit", d)
+	}
+	// And a body the handlers will read still gets through.
+	if code, out := call(t, mux, http.MethodPost, "/v1/quote",
+		`{"tokenInChainId":96369,"pad":"`+strings.Repeat("x", 4<<10)+`"}`); code != http.StatusOK {
+		t.Errorf("a 4KB body was refused: %d %v", code, out)
+	}
+}
+
+// Which subgraph's book backs a chain is the operator's choice, read off the
+// config, not whichever goroutine happened to finish first.
+func TestFirstAMMIsTheConfigsChoiceNotTheSchedulers(t *testing.T) {
+	cfg := ChainConfig{Graph: GraphSettings{Enabled: true, Subgraphs: []Subgraph{
+		{Name: "clob", Schema: "dex", Enabled: true},
+		{Name: "off", Schema: "amm", Enabled: false},
+		{Name: "book", Schema: "amm", Enabled: true},
+		{Name: "second", Schema: "all", Enabled: true},
+	}}}
+	if got := firstAMM(cfg); got != "book" {
+		t.Errorf("firstAMM = %q, want \"book\"", got)
+	}
+	// A subgraph naming no schema defaults to amm, the way runSubgraph does.
+	bare := ChainConfig{Graph: GraphSettings{Enabled: true, Subgraphs: []Subgraph{
+		{Name: "plain", Enabled: true},
+	}}}
+	if got := firstAMM(bare); got != "plain" {
+		t.Errorf("firstAMM on a schemaless subgraph = %q, want \"plain\"", got)
+	}
+	if got := firstAMM(ChainConfig{}); got != "" {
+		t.Errorf("firstAMM with no graph = %q, want empty", got)
+	}
+}
+
+// Whether a chain can build a swap is one question with one answer, asked
+// where the routes are mounted. Both addresses become a twenty-byte argument,
+// so a blank or malformed one would produce a call addressed to nothing.
+func TestCanSwapNeedsAChainAndTwoRealAddresses(t *testing.T) {
+	ok := ChainConfig{ChainID: luxChain, Router: router, Native: wlux}
+	if !canSwap(ok) {
+		t.Error("a chain with an id, a router and a wrapped native cannot swap")
+	}
+	for _, c := range []struct {
+		name string
+		cfg  ChainConfig
+	}{
+		{"no chain id", ChainConfig{Router: router, Native: wlux}},
+		{"no router", ChainConfig{ChainID: luxChain, Native: wlux}},
+		{"no native", ChainConfig{ChainID: luxChain, Router: router}},
+		{"router too short", ChainConfig{ChainID: luxChain, Router: "0xdead", Native: wlux}},
+		{"native too short", ChainConfig{ChainID: luxChain, Router: router, Native: "0xdead"}},
+		{"router not hex", ChainConfig{ChainID: luxChain, Router: "0x" + strings.Repeat("z", 40), Native: wlux}},
+		{"router with a space", ChainConfig{ChainID: luxChain, Router: router + " ", Native: wlux}},
+	} {
+		if canSwap(c.cfg) {
+			t.Errorf("%s: canSwap = true, want false", c.name)
+		}
+	}
+}

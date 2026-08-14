@@ -3,10 +3,13 @@ package main
 import (
 	"bytes"
 	"encoding/json"
+	"errors"
 	"io"
 	"net/http"
 	"strconv"
 	"strings"
+
+	"github.com/luxfi/graph/engine"
 )
 
 // The swap form's routes, without a chain in the path.
@@ -54,6 +57,38 @@ func (s *ChainSupervisor) MountSwap(mux *http.ServeMux) {
 	}
 }
 
+// canSwap reports whether a chain can build a swap at all. Both addresses are
+// rendered into a twenty-byte argument — the router the transaction is
+// addressed to, and the wrapped native a route substitutes for the coin — so
+// anything else produces a call whose arguments have slid.
+func canSwap(cfg ChainConfig) bool {
+	return cfg.ChainID != 0 && engine.IsAddress(cfg.Router) && engine.IsAddress(cfg.Native)
+}
+
+// firstAMM names the subgraph whose book backs a chain's swap routes: the
+// earliest enabled one in the config that loads AMM resolvers. Reading it off
+// the config makes the choice the operator's and the same on every restart,
+// where letting the goroutines race would make it the scheduler's.
+func firstAMM(cfg ChainConfig) string {
+	if !cfg.Graph.Enabled {
+		return ""
+	}
+	for _, sg := range cfg.Graph.Subgraphs {
+		if sg.Enabled && servesAMM(schemaOf(sg)) {
+			return sg.Name
+		}
+	}
+	return ""
+}
+
+// schemaOf is the schema a subgraph loads, defaulting the way runSubgraph does.
+func schemaOf(sg Subgraph) string {
+	if sg.Schema == "" {
+		return "amm"
+	}
+	return sg.Schema
+}
+
 // servesAMM reports whether a schema name loads the AMM resolvers — the pools
 // a quote is priced over. A chain's swap routes come from the subgraph that
 // holds its book, not from whichever subgraph happened to start first.
@@ -69,7 +104,16 @@ func servesAMM(schema string) bool {
 func (s *ChainSupervisor) dispatchSwap(w http.ResponseWriter, r *http.Request) {
 	body, err := readBody(r)
 	if err != nil {
-		writeSwapError(w, http.StatusBadRequest, "VALIDATION_ERROR", "body must be JSON")
+		// Say which failure it was. A body too long to read is not a body that
+		// failed to parse, and telling someone their JSON is malformed when it
+		// is merely large sends them looking in the wrong place.
+		var tooBig *http.MaxBytesError
+		if errors.As(err, &tooBig) {
+			writeSwapError(w, http.StatusRequestEntityTooLarge, "VALIDATION_ERROR",
+				"body must be under "+strconv.Itoa(bodyLimit>>10)+"KB")
+			return
+		}
+		writeSwapError(w, http.StatusBadRequest, "VALIDATION_ERROR", "body could not be read")
 		return
 	}
 
@@ -98,11 +142,16 @@ func (s *ChainSupervisor) dispatchSwap(w http.ResponseWriter, r *http.Request) {
 
 // readBody takes the whole body so it can be read twice: once to find the
 // chain, once by the handler.
+//
+// The limit is the handlers' own. Buffering more than they will read means
+// holding a request nobody can answer, and the reading happens here first.
+const bodyLimit = 1 << 20
+
 func readBody(r *http.Request) ([]byte, error) {
 	if r.Body == nil {
 		return nil, nil
 	}
-	return io.ReadAll(http.MaxBytesReader(nil, r.Body, 10<<20))
+	return io.ReadAll(http.MaxBytesReader(nil, r.Body, bodyLimit))
 }
 
 // chainOf finds the chain a request names, or 0 when it names none.
@@ -111,17 +160,13 @@ func readBody(r *http.Request) ([]byte, error) {
 // — a quote names the chain of each token, an approval names one chain, a swap
 // carries the quote it came from. They are all the same fact, so they are read
 // in one place instead of once per handler.
+//
+// The order is narrowest first. A quote states the chain it was priced on, and
+// that is the chain the swap must be built for — a sibling key alongside it, or
+// a query parameter, would otherwise send someone's quote to another chain's
+// router. The query is read last because a body says more than a URL does, and
+// only a GET has nothing else to say.
 func chainOf(r *http.Request, body []byte) int64 {
-	for _, k := range []string{"chainId", "tokenInChainId", "tokenOutChainId"} {
-		if v := r.URL.Query().Get(k); v != "" {
-			if n, err := strconv.ParseInt(v, 10, 64); err == nil {
-				return n
-			}
-		}
-	}
-	if len(body) == 0 {
-		return 0
-	}
 	var b struct {
 		ChainID         *int64 `json:"chainId"`
 		TokenInChainID  *int64 `json:"tokenInChainId"`
@@ -130,16 +175,22 @@ func chainOf(r *http.Request, body []byte) int64 {
 			ChainID *int64 `json:"chainId"`
 		} `json:"quote"`
 	}
-	if json.Unmarshal(body, &b) != nil {
-		return 0
-	}
-	for _, v := range []*int64{b.ChainID, b.TokenInChainID, b.TokenOutChainID} {
-		if v != nil && *v != 0 {
-			return *v
+	if len(body) > 0 && json.Unmarshal(body, &b) == nil {
+		if b.Quote != nil && b.Quote.ChainID != nil && *b.Quote.ChainID != 0 {
+			return *b.Quote.ChainID
+		}
+		for _, v := range []*int64{b.ChainID, b.TokenInChainID, b.TokenOutChainID} {
+			if v != nil && *v != 0 {
+				return *v
+			}
 		}
 	}
-	if b.Quote != nil && b.Quote.ChainID != nil {
-		return *b.Quote.ChainID
+	for _, k := range []string{"chainId", "tokenInChainId", "tokenOutChainId"} {
+		if v := r.URL.Query().Get(k); v != "" {
+			if n, err := strconv.ParseInt(v, 10, 64); err == nil {
+				return n
+			}
+		}
 	}
 	return 0
 }
