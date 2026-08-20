@@ -16,20 +16,18 @@ FROM golang:${GO_VERSION}-alpine AS builder
 ARG VERSION=dev
 RUN apk add --no-cache gcc musl-dev sqlite-dev git
 
-# luxfi/* modules are private and may be re-tagged; resolve them direct
-# (not via proxy/sumdb) and skip checksum-db cross-checks, exactly as the
-# node image does. The default GITHUB_TOKEN is repo-scoped; a cross-org PAT
-# is injected as the BuildKit secret `ghtok` by docker.yml.
-ENV GOPRIVATE=github.com/lux-private/*,github.com/hanzoai/*
-ENV GONOSUMCHECK=github.com/luxfi/*
-ENV GONOSUMDB=github.com/lux-private/*
-ENV GONOPROXY=github.com/lux-private/*
+# luxfi/* is public: it resolves through the module proxy, which serves each
+# version immutably, and verifies against the checksum database under the h1:
+# hashes in go.sum — so a tag that moves upstream cannot change the bytes this
+# build compiles. GOPRIVATE names only the namespace that is actually private;
+# a cross-org PAT is injected as the BuildKit secret `ghtok` by docker.yml.
+ENV GOPRIVATE=github.com/hanzoai/*
 ENV GOFLAGS=-mod=mod
 
 WORKDIR /src
 COPY go.mod go.sum ./
 # Configure git auth once so both `go mod download` here and the implicit
-# fetch during `go build` can reach private luxfi/* modules.
+# fetch during `go build` can reach the private hanzoai/* modules.
 RUN --mount=type=secret,id=ghtok,required=false \
     if [ -s /run/secrets/ghtok ]; then \
         git config --global url."https://x-access-token:$(cat /run/secrets/ghtok)@github.com/".insteadOf "https://github.com/"; \
