@@ -14,30 +14,30 @@ func TestBrowserRPC(t *testing.T) {
 		want string
 	}{{
 		name: "cluster-internal RPC is never handed to a browser",
-		in:   ChainConfig{RPC: "http://luxd-headless.lux-mainnet.svc.cluster.local:9630/v1/bc/C/rpc"},
+		in:   ChainConfig{RPC: "http://luxd-headless.lux-mainnet.svc.cluster.local:9630/v1/chain/C/rpc"},
 		want: "",
 	}, {
 		name: "explicit public_rpc wins",
 		in: ChainConfig{
-			RPC:       "http://luxd-headless.lux-mainnet.svc.cluster.local:9630/v1/bc/C/rpc",
-			PublicRPC: "https://api.lux.network/v1/bc/C/rpc",
+			RPC:       "http://luxd-headless.lux-mainnet.svc.cluster.local:9630/v1/chain/C/rpc",
+			PublicRPC: "https://api.lux.network/v1/chain/C/rpc",
 		},
-		want: "https://api.lux.network/v1/bc/C/rpc",
+		want: "https://api.lux.network/v1/chain/C/rpc",
 	}, {
 		name: "already-public RPC passes through unchanged",
-		in:   ChainConfig{RPC: "https://api.zoo.ngo/v1/bc/C/rpc"},
-		want: "https://api.zoo.ngo/v1/bc/C/rpc",
+		in:   ChainConfig{RPC: "https://api.zoo.ngo/v1/chain/C/rpc"},
+		want: "https://api.zoo.ngo/v1/chain/C/rpc",
 	}, {
 		name: "bare service name is not public",
-		in:   ChainConfig{RPC: "http://luxd-headless:9630/v1/bc/C/rpc"},
+		in:   ChainConfig{RPC: "http://luxd-headless:9630/v1/chain/C/rpc"},
 		want: "",
 	}, {
 		name: "loopback is not public",
-		in:   ChainConfig{RPC: "http://127.0.0.1:9630/v1/bc/C/rpc"},
+		in:   ChainConfig{RPC: "http://127.0.0.1:9630/v1/chain/C/rpc"},
 		want: "",
 	}, {
 		name: "RFC1918 literal is not public",
-		in:   ChainConfig{RPC: "http://10.150.2.1:9630/v1/bc/C/rpc"},
+		in:   ChainConfig{RPC: "http://10.150.2.1:9630/v1/chain/C/rpc"},
 		want: "",
 	}, {
 		name: "empty stays empty",
