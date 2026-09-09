@@ -466,10 +466,21 @@ func (s *ChainSupervisor) runSubgraph(ctx context.Context, cfg ChainConfig, sg S
 		w.Header().Set("Content-Type", "application/json")
 		json.NewEncoder(w).Encode(resp)
 	}
+	// `block` is the cursor the STORE holds, not the one this process has moved.
+	// Status() counts what the running indexer has ingested since it started, so
+	// a restart on a chain already at its head reports `block:0, indexed:0` while
+	// the store holds every event — which reads as an empty index and is the
+	// reply a reader checks this endpoint to avoid. `indexed` stays the process
+	// count: nothing persists an event total, and a second number that means
+	// something else under the same name is how this went wrong once.
 	statusHandler := func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		st := idx.Status()
-		fmt.Fprintf(w, `{"status":"ok","block":%d,"indexed":%d}`, st.LatestBlock, st.IndexedEvents)
+		block := store.GetLastBlock()
+		if st.LatestBlock > block {
+			block = st.LatestBlock
+		}
+		fmt.Fprintf(w, `{"status":"ok","block":%d,"indexed":%d}`, block, st.IndexedEvents)
 	}
 	mux.HandleFunc("POST "+prefix+"/graphql", gqlHandler)
 	mux.HandleFunc("GET "+prefix+"/graphql", eng.HandleGraphiQL)
