@@ -42,20 +42,26 @@ COPY . .
 # executed by anything but a developer's laptop.
 RUN CGO_ENABLED=1 CGO_CFLAGS="-D_LARGEFILE64_SOURCE" go vet ./... && \
     CGO_ENABLED=1 CGO_CFLAGS="-D_LARGEFILE64_SOURCE" go test ./...
+# Statically linked, so the image can be scratch. CGO is required for SQLite,
+# and musl links static cleanly where glibc does not — which is what lets the
+# runtime below hold the binary and nothing else.
 RUN CGO_ENABLED=1 CGO_CFLAGS="-D_LARGEFILE64_SOURCE" \
     go build -trimpath \
-      -ldflags="-s -w -X main.version=${VERSION}" \
+      -ldflags="-s -w -linkmode external -extldflags '-static' -X main.version=${VERSION}" \
       -o /out/explorer .
 
 # ---- Stage 2: runtime ----
-FROM alpine:3.21
-RUN apk add --no-cache ca-certificates sqlite-libs wget
+# Nothing but the binary and the roots it verifies TLS with. The explorer is
+# statically linked and serves its own frontend from //go:embed, so there is no
+# libc, no sqlite-libs, no shell and no package manager to keep patched.
+#
+# The HEALTHCHECK is gone with the shell it needed: Kubernetes probes the
+# /health endpoint directly, and a healthcheck that shells out is a second
+# opinion that can disagree with the first.
+FROM gcr.io/distroless/static-debian12:nonroot
 COPY --from=builder /out/explorer /usr/local/bin/explorer
-RUN adduser -D -u 65532 explorer
-USER explorer
+USER nonroot
 VOLUME /data
 ENV DATA_DIR=/data HTTP_ADDR=:8090
 EXPOSE 8090
-HEALTHCHECK --interval=30s --timeout=5s --start-period=10s \
-  CMD wget -qO- http://localhost:8090/health || exit 1
 ENTRYPOINT ["explorer"]
