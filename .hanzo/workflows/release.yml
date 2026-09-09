@@ -8,6 +8,12 @@ name: Release
 # v* tag queued a job nothing could pick up. A job naming a label no runner carries
 # does not fail; it waits. That is why v1.5.4 was tagged and never became an image.
 #
+# `linux-amd64` is that label read off the pool rather than chosen: every runner
+# this forge spawns registers `RUNNER_LABELS=linux-amd64:host`, and hanzo/universe
+# — which does build — asks for exactly that. `lux-build-linux-amd64` was the
+# second name for the same idea and no runner has ever carried it, so this file
+# had inherited the waiting-forever it was written to end.
+#
 # Same shape as luxfi/graph's release.yml: ghcr auth via the org GHCR_USER /
 # GHCR_TOKEN secrets sourced from KMS (the instance GITHUB_TOKEN on this forge is a
 # Hanzo Git token and carries no rights at ghcr.io), and a registry layer cache
@@ -31,7 +37,7 @@ concurrency:
 
 jobs:
   docker:
-    runs-on: [lux-build-linux-amd64]
+    runs-on: [linux-amd64]
     timeout-minutes: 45
     steps:
       - uses: actions/checkout@v4
