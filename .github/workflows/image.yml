@@ -1,0 +1,68 @@
+name: image
+
+# The explorer, as an image, for both architectures.
+#
+# This repository had no image workflow, so the published tags predate the
+# frontend it now embeds: 1.5.49 serves /v1 and 404s on /, which is why five
+# separate frontend pods exist to serve what this binary already carries.
+
+on:
+  push:
+    branches: [main]
+    tags: ['v*']
+  workflow_dispatch:
+
+concurrency:
+  group: image-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+  packages: write
+
+jobs:
+  image:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - arch: amd64
+            pool: linux-amd64
+          - arch: arm64
+            pool: linux-arm64
+    runs-on: ['${{ matrix.pool }}']
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+      - uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - name: Build and push this architecture
+        run: |
+          set -euo pipefail
+          img=ghcr.io/luxfi/explorer
+          docker build -t "$img:${GITHUB_SHA::7}-${{ matrix.arch }}" .
+          docker push "$img:${GITHUB_SHA::7}-${{ matrix.arch }}"
+
+  merge:
+    needs: image
+    runs-on: [linux-amd64]
+    permissions:
+      packages: write
+    steps:
+      - uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      # One name carrying both, so it cannot pull on one arch and fail on the other.
+      - name: One name, both architectures
+        run: |
+          set -euo pipefail
+          img=ghcr.io/luxfi/explorer
+          docker buildx imagetools create -t "$img:${GITHUB_SHA::7}" -t "$img:main" \
+            "$img:${GITHUB_SHA::7}-amd64" "$img:${GITHUB_SHA::7}-arm64"
+          docker buildx imagetools inspect "$img:${GITHUB_SHA::7}" \
+            --format '{{range .Manifest.Manifests}}{{.Platform.OS}}/{{.Platform.Architecture}} {{end}}'
