@@ -84,11 +84,15 @@ func (r *sseRegistry) fanout(chain string, envelope []byte) {
 	}
 }
 
-// streamChain is the chain an SSE subscriber receives: whatever `?chain=`
-// asks for, else the chain the request host is served. Never empty, because
-// an empty filter means "every chain the hub broadcasts" and no brand host
-// wants another brand's blocks.
+// streamChain is the chain an SSE subscriber receives: the chain its path
+// names (/v1/indexer/{chain}/v1/base/realtime), else whatever `?chain=` asks
+// for, else the chain the request host is served. Never empty, because an
+// empty filter means "every chain the hub broadcasts" and no brand host wants
+// another brand's blocks.
 func streamChain(cfg Config, r *http.Request) string {
+	if p := r.PathValue("chain"); p != "" {
+		return p
+	}
 	if q := strings.TrimSpace(r.URL.Query().Get("chain")); q != "" {
 		return q
 	}

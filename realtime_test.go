@@ -200,8 +200,8 @@ func TestRealtimeStatsEndpoint(t *testing.T) {
 	}
 }
 
-// The realtime stream carries the chain of the host it was opened on, and
-// nothing else. One binary indexes five chains and broadcasts all of them onto
+// The realtime stream carries the chain its path or host names, and nothing
+// else. One binary indexes five chains and broadcasts all of them onto
 // one hub; an unscoped stream put Lux and Zoo blocks into Hanzo's block list,
 // which is how a 50-block page rendered 63 rows.
 func TestRealtimeStreamCarriesOnlyTheHostsChain(t *testing.T) {
@@ -214,18 +214,21 @@ func TestRealtimeStreamCarriesOnlyTheHostsChain(t *testing.T) {
 
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /v1/base/realtime", hub.HandleMultiplexedSSE(cfg))
+	mux.HandleFunc("GET /v1/indexer/{chain}/v1/base/realtime", hub.HandleMultiplexedSSE(cfg))
 	ts := httptest.NewServer(mux)
 	defer ts.Close()
 
 	for _, tc := range []struct {
 		host string
+		path string
 		want string
 	}{
-		{"api-explore.hanzo.network", "hanzo"},
-		{"explore.zoo.network", "zoo"},
-		{"api-explore.lux.network", "cchain"}, // names no chain -> the default
+		{"api-explore.hanzo.network", "/v1/base/realtime", "hanzo"},
+		{"explore.zoo.network", "/v1/base/realtime", "zoo"},
+		{"api-explore.lux.network", "/v1/base/realtime", "cchain"},             // names no chain -> the default
+		{"api-explore.lux.network", "/v1/indexer/zoo/v1/base/realtime", "zoo"}, // the path outranks the host
 	} {
-		req, err := http.NewRequest(http.MethodGet, ts.URL+"/v1/base/realtime", nil)
+		req, err := http.NewRequest(http.MethodGet, ts.URL+tc.path, nil)
 		if err != nil {
 			t.Fatal(err)
 		}

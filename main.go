@@ -168,6 +168,10 @@ func main() {
 	realtime := registry.hub.HandleMultiplexedSSE(cfg)
 	mux.HandleFunc("GET /v1/base/realtime", realtime)
 	mux.HandleFunc("HEAD /v1/base/realtime", realtime)
+	// A page whose API base is /v1/indexer/<slug> builds its socket URL from
+	// that base, so the same stream answers under the prefix, scoped to <slug>.
+	mux.HandleFunc("GET /v1/indexer/{chain}/v1/base/realtime", realtime)
+	mux.HandleFunc("HEAD /v1/indexer/{chain}/v1/base/realtime", realtime)
 
 	supervisor.MountRoutes(mux)
 	supervisor.MountSwap(mux)

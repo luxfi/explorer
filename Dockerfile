@@ -6,7 +6,7 @@
 # per-brand Blockscout FE Deployment (ghcr.io/{brand-org}/explore-{env}).
 # Built from luxfi/explore via Dockerfile.branded — see ~/work/lux/explore.
 
-ARG GO_VERSION=1.26
+ARG GO_VERSION=1.27
 
 # ---- Stage 1: build the unified FE + indexer + graph binary ----
 # graph + indexer are consumed as Go modules pinned in go.mod (luxfi/graph
