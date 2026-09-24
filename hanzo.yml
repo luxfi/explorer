@@ -1,0 +1,9 @@
+# Hanzo CI/CD for luxfi/explorer: .github/workflows/cicd.yml imports hanzoai/ci,
+# which reads this file. The build door builds each image, one BuildKit Job
+# per platform.
+images:
+  - name: explorer
+    context: .
+    dockerfile: Dockerfile
+    repo: ghcr.io/luxfi/explorer
+    platforms: [linux/amd64, linux/arm64]
